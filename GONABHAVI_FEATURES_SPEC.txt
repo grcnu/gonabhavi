@@ -1,0 +1,1713 @@
+==============================================================
+GONABHAVI ACCOUNTING SOFTWARE — FULL FEATURE SPECIFICATION
+==============================================================
+Purpose: This document describes every feature, screen, menu,
+calculation, and rule in the Gonabhavi billing/accounting app
+in plain English. No programming language is mentioned.
+Use this file as a blueprint to rebuild the same software
+in any modern language or framework.
+==============================================================
+
+
+==============================================================
+SECTION 1 — WHAT THE SOFTWARE IS
+==============================================================
+
+Gonabhavi is a billing and accounting application for small
+Indian businesses. It manages:
+- Products / inventory
+- Customers and their dues
+- Sales invoices (with GST breakdown on invoice output only)
+- Purchase bills from suppliers
+- Expenses
+- Payments in and out
+- Fund transfers between Cash, UPI, and Bank accounts
+- Cloud sync across multiple devices (Windows + Android)
+
+Currency is Indian Rupees (₹). All amounts are shown with
+2 decimal places. Indian number formatting is used (e.g. ₹1,00,000.00).
+
+
+FIELD NAME GLOSSARY (use these exact names everywhere in code):
+  Sale Price (MRP)  = the customer-facing MRP, always GST-inclusive.
+                      "Sale Price" and "MRP" mean the same thing.
+  Purchase Price    = the product's stored last-known purchase rate
+                      (before tax), auto-updated from purchase bills.
+  Rate              = the editable per-line price on invoices,
+                      sale orders, quotations, and estimates.
+                      Defaults to the product's Sale Price (MRP).
+  Purchase Rate     = the editable per-line price on purchase bills.
+                      Always before tax (GST is added on top).
+                      Different from Rate because Rate is GST-inclusive
+                      but Purchase Rate is before tax.
+  Grand Total       = sum of all line totals on an invoice or bill.
+  Final Discount    = optional extra discount on the whole invoice.
+  Grand Total after Final Discount = Grand Total - Final Discount.
+  Balance Due       = amount the customer/supplier still owes.
+  Opening Balance   = dues carried over from before software use.
+  Opening Stock     = stock count entered when a product was created.
+  Cash Paid / UPI Paid / Bank Paid = payment split fields.
+
+
+==============================================================
+SECTION 2 — COMPANY PROFILE (Settings)
+==============================================================
+
+Fields stored for the company:
+- Company Name
+- Phone Number
+- Email Address
+- Full Address
+- GSTIN (GST registration number)
+- PAN number
+- State Name
+- State Code (2-digit)
+- Bank Name
+- Bank Account Number
+- IFSC Code
+- UPI ID
+- Invoice Terms (e.g. "Thank you for your business.")
+- Company Logo (image upload)
+- Authorized Signature (image upload)
+
+Invoice Numbering Settings:
+- Prefix (e.g. INV)
+- Suffix (optional, e.g. /2024)
+- Separator between prefix and number (e.g. -)
+- Start Number (e.g. 1)
+- Padding (how many digits, e.g. 4 gives "0001")
+- Financial Year Reset toggle (if ON, number resets each April)
+- Invoice Template style (classic or other styles)
+
+Example invoice number: INV-0001 or GST/2024-0023
+
+Company Profile validation rules:
+- Company Name is required (cannot be blank)
+- GSTIN must be exactly 15 alphanumeric characters if provided
+- PAN must be exactly 10 characters (format: AAAAA9999A) if provided
+- State Code must be a valid 2-digit number (01-37) if provided
+- Phone Number must be 10 digits if provided
+- Email must be a valid email format if provided
+- All other fields are optional but recommended
+
+
+==============================================================
+SECTION 3 — PRODUCT MASTER
+==============================================================
+
+Each product has:
+- Name (required)
+- QR / Barcode value (required, used for scanning)
+- Category
+- Description
+- Sale Price (MRP) — this is always the final customer-facing
+  price INCLUDING GST. MRP = Sale Price, same thing.
+- Purchase Price (last known purchase rate, before tax;
+  used for Inventory Value in Balance Sheet;
+  updated automatically when a new purchase bill is saved)
+- GST Rate % (0, 5, 12, 18, or 28)
+- Default Discount % (applied on billing)
+- Opening Stock quantity
+
+PRICING RULE (important, no toggle needed):
+  Sale Price (MRP) = always INCLUDES GST.
+  Purchase Price    = always BEFORE TAX (GST is added on top).
+  There is NO "GST included / excluded" toggle anywhere.
+
+Current stock is calculated automatically (not stored):
+  Current Stock = Opening Stock + Purchased Qty
+                - Sold Qty + Sales Returns Qty
+                - Purchase Returns Qty + Net Stock Adjustments
+  (Full formula with all edge cases defined in Section 33)
+
+Stock status labels:
+  <= 0 = "Out of Stock"
+  1-5  = "Low Stock"
+  > 5  = "Available"
+
+Product rules:
+- A product cannot be deleted if it has been used in any
+  invoice, purchase bill, sale order, stock adjustment,
+  quotation, estimate, delivery challan, sales return,
+  or purchase return (where is_deleted=false).
+- QR / Barcode value must be unique across all products.
+  Duplicate QR codes are blocked on save with an error message.
+- Sale Price (MRP) must be >= 0.
+- GST Rate must be one of: 0, 5, 12, 18, or 28.
+- Default Discount % must be between 0 and 100.
+- Opening Stock must be >= 0.
+- Product can be imported in bulk from a CSV file with
+  columns: name, qr, category, description, price, gst,
+  discount, stock
+
+CSV import behavior:
+- If a product with the same QR code already exists, it is
+  updated (not duplicated).
+- New products are added.
+- Rows with missing required fields (name or qr) are skipped with
+  a warning message shown after import.
+
+
+==============================================================
+SECTION 4 — CUSTOMER MASTER
+==============================================================
+
+Each customer has:
+- Name (required)
+- Phone Number (optional)
+- Email Address (optional, for sending invoices)
+- Full Address (optional, printed on invoice if provided)
+- GSTIN (optional)
+- Opening Balance (old pending amount before software use,
+  defaults to 0 if not entered)
+
+Note: Payment-In entries linked to this customer are stored
+in the payment_ins table (not as a field on the customer).
+They are fetched when calculating the customer's balance.
+
+All fields except Name are optional to keep billing fast.
+Phone, Email, Address, GSTIN can be filled later by editing.
+
+Customer balance calculation:
+  Total Due = Opening Balance
+            + Sum of all invoice Grand Totals after Final Discount
+            - Sum of all sales return totals (returns reduce due)
+  Total Paid = Sum of all payments on invoices
+             + Sum of all standalone Payment-In entries
+  Balance    = Total Due - Total Paid (minimum 0)
+
+Customer rules:
+- A customer cannot be deleted if they have invoices,
+  sale orders, payment-in entries, sales returns,
+  quotations, estimates, delivery challans,
+  or a non-zero opening balance
+  (only non-deleted records, i.e. is_deleted=false, block deletion).
+- A payment can be added directly while editing the customer.
+- Phone number must be 10 digits if provided.
+- GSTIN must be 15 alphanumeric characters if provided.
+
+
+==============================================================
+SECTION 5 — SUPPLIER MASTER
+==============================================================
+
+Each supplier has:
+- Name (required)
+- Phone Number (optional)
+- Email Address (optional)
+- Full Address (optional)
+- GSTIN (optional)
+- Opening Balance (amount owed before software use,
+  defaults to 0 if not entered)
+
+All fields except Name are optional.
+
+Supplier balance calculation:
+  Total Owed = Opening Balance
+             + Sum of all purchase bill Grand Totals
+             - Sum of all purchase return totals (returns reduce owed)
+  Total Paid = Sum of all Payment-Out entries
+  Balance    = Total Owed - Total Paid (minimum 0)
+
+Supplier rules:
+- Cannot be deleted if they have purchase bills,
+  purchase returns, or payment-out entries
+  (only non-deleted records, i.e. is_deleted=false, block deletion)
+  or a non-zero opening balance.
+- Phone number must be 10 digits if provided.
+- GSTIN must be 15 alphanumeric characters if provided.
+
+
+==============================================================
+SECTION 6 — SALE INVOICE (Billing Screen)
+==============================================================
+
+Invoice header fields:
+- Invoice Number (auto-generated, can be edited)
+- Date
+- Customer (select from list or add new quickly)
+
+Adding items to the invoice:
+- Select product from dropdown, enter quantity, click Add
+  OR
+- Scan QR/barcode with USB scanner (type code + Enter) or
+  camera scanner (detects QR, Code128, EAN-13)
+  OR
+- Quick-add a brand new product inline without leaving billing
+
+Quick-add product from billing screen fields:
+- Name, QR, Category, Description, Sale Price (MRP), GST%, Discount%, Stock
+- Product is saved permanently and added to the invoice line
+
+Quick-add customer from billing screen fields:
+- Name (required), Phone, Email, GSTIN
+- Customer is saved permanently and selected on the invoice
+- Address can be added later by editing the customer
+
+Each invoice line (item row) has:
+- Product name (read-only after adding)
+- Quantity (editable)
+- Rate (editable, defaults to product's Sale Price)
+- Discount % (editable, per-line)
+- GST % (editable, per-line)
+- Line Total (calculated automatically)
+
+LINE TOTAL CALCULATION (Rate = Sale Price = MRP, GST-inclusive):
+  Gross = Quantity × Rate
+  Discount Amount = Gross × (Discount% / 100)
+  After Discount = Gross - Discount Amount
+
+  Taxable Amount = After Discount / (1 + GST%/100)
+  GST Amount     = After Discount - Taxable Amount
+  Line Total     = After Discount  (what the customer pays)
+
+Invoice totals:
+  Subtotal       = Sum of all Taxable Amounts across lines
+  Total Discount = Sum of all Discount Amounts across lines
+  Total GST      = Sum of all GST Amounts across lines
+  Grand Total    = Sum of all Line Totals
+
+  Final Discount = Optional extra discount on the whole invoice
+                   (cannot exceed Grand Total)
+  Grand Total after Final Discount = Grand Total - Final Discount
+
+Payment fields (split by method):
+  Cash Paid   (editable)
+  UPI Paid    (editable)
+  Bank Paid (editable)
+  Balance Due = Grand Total after Final Discount
+             - (Cash + UPI + Bank)
+
+INVOICE VALIDATION RULES:
+  - Invoice Number must be unique across all saved invoices.
+    If a duplicate is detected, show error and block save.
+  - Each item line must have Quantity > 0.
+  - Rate must be >= 0 for each line.
+  - Discount % must be between 0 and 100 for each line.
+  - GST % must be one of: 0, 5, 12, 18, 28 for each line.
+  - Total paid (Cash + UPI + Bank) cannot exceed
+    Grand Total after Final Discount. Overpayment is blocked.
+  - At least one item line must be present to save.
+  - Balance Due cannot be negative.
+  - If customer is not selected, invoice is treated as
+    a walk-in / cash sale (no customer balance tracking).
+
+Invoice actions:
+- Save Invoice: Saves to invoice list, reduces stock
+- Update Invoice: Updates existing saved invoice
+- Print Invoice: Opens print dialog with formatted invoice
+- New Invoice: Clears form for a fresh invoice
+
+Invoice print layout includes:
+- Company name, address, phone, GSTIN
+- Invoice number, date
+- Customer name, address, GSTIN (if available)
+- Items table (name, qty, rate, discount%, GST%, line total)
+- Subtotal, Total Discount, Total GST
+- Grand Total
+- Final Discount (if any)
+- Grand Total after Final Discount
+- Amount Paid (Cash / UPI / Bank)
+- Balance Due
+- Terms and conditions
+- Invoice template style (classic or custom)
+
+
+==============================================================
+SECTION 7 — INVOICE LIST
+==============================================================
+
+Shows all saved invoices with:
+- Invoice number
+- Date
+- Customer name
+- Number of items
+- Grand total
+- Amount paid
+- Balance Due
+- Payment status badge (Paid / Partial / Pending)
+
+Filters and search:
+- Search by invoice number or customer name
+- Filter by date range (From date — To date)
+- Filter by payment status: All / Paid / Partial / Pending
+  (Paid = balance 0, Partial = some paid, Pending = nothing paid)
+- Sort by date (newest first by default)
+
+Actions per invoice:
+- View: Shows full detail panel
+- Edit: Loads invoice back into billing screen for changes
+- Print: Prints the invoice
+- Share: Download invoice as PDF or share via WhatsApp
+  (generates a PDF file of the printed invoice layout)
+- Receive Balance: Receive pending payment on this invoice
+  (only shown when Balance Due > 0)
+- Delete: Only allowed if no payment has been recorded
+          on the invoice (prevents loss of payment history)
+
+RECEIVE BALANCE ACTION (for invoices with pending balance):
+  Opens a dialog with:
+  - Invoice Number and Customer Name (read-only, for reference)
+  - Current Balance Due (read-only, shows pending amount)
+  - Amount to Receive (editable, defaults to full Balance Due)
+  - Payment Method: Cash / UPI / Bank (select one)
+  - Date (defaults to today, editable)
+  - Note (optional)
+
+  Validation rules:
+  - Amount must be greater than 0
+  - Amount must not exceed the current Balance Due
+  - Payment Method must be selected
+
+  On Save:
+  - The received amount is added to the invoice's paid total
+    for the chosen method (Cash Paid / UPI Paid / Bank Paid)
+  - Balance Due is recalculated:
+      Balance Due = Grand Total after Final Discount
+                  - (Cash Paid + UPI Paid + Bank Paid)
+  - The Cash / UPI / Bank balance in reports is increased
+  - Entry appears in the Money Ledger as "Invoice Payment"
+  - Entry appears in the Customer Ledger as a credit
+  - Action is logged in the Audit Log
+  - If Balance Due becomes 0, the invoice is fully settled
+
+  Partial payments are allowed — the user can receive any
+  amount up to the Balance Due. Multiple partial payments
+  can be made over time until the invoice is fully paid.
+
+Invoice delete rule: If the invoice has any paid amount
+recorded, the user must first edit the invoice and set
+all paid amounts to zero before deleting.
+
+
+==============================================================
+SECTION 8 — SALE ORDER
+==============================================================
+
+A sale order is a booking or order confirmation that does NOT
+yet reduce stock or create a receivable balance.
+
+Sale Order fields:
+- Order Number (auto: SO-0001, SO-0002...)
+- Date
+- Customer (optional)
+- Items (same as invoice lines — product, qty, rate, discount, GST)
+- Note (optional)
+
+Saved sale orders list shows:
+- Order number, date, customer name, item count, total amount
+
+Actions:
+- Save Sale Order
+- Edit Sale Order: Load back for modifications
+- Convert to Invoice: Copies all items into a new invoice
+  so it can be billed properly
+- Delete Sale Order
+
+Sale Order rules:
+- A sale order can be converted to invoice multiple times
+  (each conversion creates a NEW invoice; the sale order
+  is NOT automatically deleted after conversion).
+- Sale order does NOT affect stock or customer balance.
+- At least one item line is required to save.
+
+
+==============================================================
+SECTION 9 — PURCHASE BILL
+==============================================================
+
+Records stock coming in from a supplier.
+
+Purchase Bill fields:
+- Bill Number (auto: PUR-0001, or type supplier bill number)
+- Date
+- Supplier (select from supplier master, or type name for
+  quick entry without linking to master)
+- Items table:
+    Product, Quantity, Purchase Rate (before tax), GST%
+
+Each purchase line increases the product's stock.
+
+Note: Purchase bill lines do NOT have a per-line discount field.
+The purchase rate entered is the final rate before tax.
+Discount from the supplier should be reflected in the rate itself.
+
+PURCHASE LINE TOTAL CALCULATION (price is always before tax):
+  Gross          = Quantity × Purchase Rate
+  Taxable Amount = Gross (Purchase Rate is already before tax)
+  GST Amount     = Taxable Amount × (GST% / 100)
+  Line Total     = Taxable Amount + GST Amount
+
+Payment fields (on purchase bill):
+  Cash Paid   (editable)
+  UPI Paid    (editable)
+  Bank Paid   (editable)
+  Balance Due = Grand Total - (Cash + UPI + Bank)
+
+Saved purchases show:
+- Bill number, date, supplier, item count, total, paid, balance
+
+Purchase Bill actions:
+- Save Purchase Bill
+- Edit Purchase Bill: Load back for modifications
+- Delete Purchase Bill
+
+Purchase Bill rules:
+- Bill Number must be unique across all purchase bills.
+- Supplier name must not be blank (even for free-text entry).
+- At least one item line is required to save.
+- Quantity must be > 0, Purchase Rate must be >= 0.
+- GST % per line must be 0, 5, 12, 18, or 28.
+- Total paid cannot exceed Grand Total (no overpayment).
+- Balance Due on purchase bill cannot be negative.
+
+
+==============================================================
+SECTION 10 — PAYMENT-IN
+==============================================================
+
+Records a standalone payment received from a customer
+(separate from invoice payments).
+
+Use case: Customer had old dues and paid cash today without
+a new invoice being created.
+
+Fields:
+- Customer (select)
+- Date
+- Amount
+- Method (Cash / UPI / Bank)
+- Note
+
+The Payment-In screen also shows all customers with their
+total billed, total paid, and current balance.
+
+Payment-In rules:
+- Each Payment-In entry can be deleted.
+- Payment-In entries cannot be edited after saving.
+  To correct, delete and re-enter.
+- Amount must be > 0.
+- Customer must be selected.
+
+
+==============================================================
+SECTION 11 — PAYMENT-OUT
+==============================================================
+
+Records a payment made to a supplier.
+
+Fields:
+- Supplier (select from supplier master)
+- Date
+- Amount
+- Method (Cash / UPI / Bank)
+- Note
+
+Saved payments show: date, supplier, amount, method, note.
+
+Payment-Out rules:
+- Each Payment-Out entry can be deleted.
+- Payment-Out entries cannot be edited after saving.
+  To correct, delete and re-enter.
+- Amount must be > 0.
+- Supplier must be selected.
+
+
+==============================================================
+SECTION 12 — EXPENSES
+==============================================================
+
+Records any business expense (rent, electricity, travel, etc.)
+
+Fields:
+- Date
+- Category (e.g. Rent, Electricity, Transport)
+- Description
+- Amount
+- Payment Method (Cash / UPI / Bank)
+
+Expenses reduce the Cash/UPI/Bank balance in reports.
+Each expense can be deleted.
+Expenses cannot be edited after saving. To correct,
+delete and re-enter.
+
+
+==============================================================
+SECTION 13 — INVENTORY SCREEN
+==============================================================
+
+Shows all products with current live stock.
+
+Columns:
+- Product name
+- Category
+- Description
+- QR/barcode value
+- Current Stock (calculated)
+- Sale Price (MRP)
+- GST%
+- Stock Status (Available / Low Stock / Out of Stock)
+
+Filters:
+- Search by name, QR, category, or description
+- Filter by Category
+- Filter by Stock Status
+
+Each product has a History button that shows a full
+stock movement timeline:
+- Opening stock entry
+- Each purchase (qty in, reference, supplier, amount)
+- Each sale (qty out, invoice number, customer, amount)
+- Each sale order (shown for reference only — does NOT
+  affect the stock balance column)
+- Each stock adjustment (qty in or out, reason, note)
+- Running stock balance column (excludes sale orders)
+
+
+==============================================================
+SECTION 14 — STOCK ADJUSTMENT
+==============================================================
+
+Used to correct stock for damage, theft, missing items,
+or manual count correction.
+
+Fields:
+- Date
+- Product (select)
+- Quantity Change (positive = add stock, negative = remove)
+- Reason (e.g. Damaged, Expired, Count Correction)
+- Note
+
+Examples:
+  +5 = found 5 extra units during count
+  -3 = 3 units damaged and discarded
+
+Adjustments are included in the live stock calculation.
+Each adjustment can be deleted.
+
+Stock Adjustment rules:
+- Quantity Change must not be zero (must add or remove stock).
+- Product must be selected.
+- Reason is required.
+
+
+==============================================================
+SECTION 15 — QUOTATION
+==============================================================
+
+A price quote sent to a customer before a sale is confirmed.
+Does not affect stock or balances.
+
+Fields:
+- Quotation Number (auto: QT-0001...)
+- Date
+- Valid Until date
+- Customer
+- Items (product, qty, rate, discount, GST — same as invoice)
+- Note
+- Total amount
+
+Actions:
+- Save Quotation
+- Edit Quotation: Load back for modifications
+- Convert to Invoice: Copies lines to new invoice for billing
+- Delete Quotation
+
+Quotation rules:
+- Quotation Number must be unique across all quotations.
+- Quotations past their Valid Until date are visually marked
+  as "Expired" in the list (but can still be converted).
+- At least one item line is required to save.
+
+
+==============================================================
+SECTION 16 — FUND TRANSFER (Cash / UPI → Bank)
+==============================================================
+
+Used to record the transfer of collected Cash or UPI money
+into the business Bank account. This is common for small
+businesses that collect payments in cash or via UPI during
+the day and deposit them into the bank periodically.
+
+Opens in a SEPARATE WINDOW / DIALOG (not inline).
+
+Transfer types supported:
+- Cash → Bank   (physical cash deposited into bank account)
+- UPI  → Bank   (UPI collections transferred to bank account)
+
+Fields:
+- Date (defaults to today, editable)
+- Transfer From: Cash or UPI (select one)
+- Transfer To: Bank (fixed, always Bank)
+- Amount (must be > 0)
+- Reference / Note (optional, e.g. "Daily cash deposit",
+  "UPI settlement", bank slip number, etc.)
+
+Saved transfers list shows:
+- Date
+- From account (Cash / UPI)
+- Amount transferred
+- Reference / Note
+- Each entry can be deleted
+
+EFFECT ON BALANCES:
+  When a Cash → Bank transfer is saved:
+    Cash Balance DECREASES by the transfer amount
+    Bank Balance INCREASES by the transfer amount
+
+  When a UPI → Bank transfer is saved:
+    UPI Balance DECREASES by the transfer amount
+    Bank Balance INCREASES by the transfer amount
+
+  When a transfer is deleted:
+    The effect is reversed (source balance increases,
+    Bank balance decreases by the same amount)
+
+VALIDATION RULES:
+  - Amount must be greater than 0
+  - Transfer From must be selected (Cash or UPI)
+  - Amount SHOULD NOT exceed the current balance of the
+    source account (Cash or UPI). If it does, show a
+    warning: "Transfer amount exceeds available [Cash/UPI]
+    balance of ₹X.XX. Are you sure?" — allow override
+    with confirmation.
+  - A transfer does NOT create any invoice, expense, or
+    payment record. It is purely an internal fund movement.
+
+AUDIT:
+  Each transfer saved or deleted is logged in the Audit Log.
+  Transfers appear in the Money Ledger as two linked entries
+  (one Money Out from source, one Money In to Bank).
+
+
+==============================================================
+SECTION 17 — SALES RETURN
+==============================================================
+
+Records goods returned by a customer from a previous invoice.
+
+Fields:
+- Return Number (auto: SR-0001...)
+- Date
+- Select original Invoice (shows customer's old invoice items)
+- For each line: Return Quantity (must be <= originally sold qty)
+- Reason per line
+
+Effect:
+- Returned items go BACK into stock (qty increases)
+- Total return amount is calculated using the same pricing
+  as the original invoice line (Rate, Discount %, GST %)
+- Customer's balance is REDUCED by the return amount
+  (the return total is subtracted from what the customer owes)
+
+Sales Return rules:
+- Return Quantity per line must be > 0 and <= originally sold qty.
+- Total returned qty across ALL returns for the same invoice line
+  must not exceed the originally sold qty on that line.
+- A sales return can be deleted. On delete:
+  - Stock adjustment is reversed (returned qty is removed from stock)
+  - Customer's balance is restored (return amount is added back to due)
+- Sales returns cannot be edited after saving.
+  To correct, delete and re-enter.
+- At least one line with Return Quantity > 0 is required to save.
+
+
+==============================================================
+SECTION 18 — PURCHASE RETURN
+==============================================================
+
+Records goods returned to a supplier from a previous purchase.
+
+Fields:
+- Return Number (auto: PR-0001...)
+- Date
+- Select original Purchase Bill
+- For each line: Return Quantity + Reason
+
+Effect:
+- Returned items are REMOVED from stock (qty decreases)
+- Supplier's balance is REDUCED by the return amount
+  (the return total is subtracted from what is owed to supplier)
+
+Purchase Return rules:
+- Return Quantity per line must be > 0 and <= originally purchased qty.
+- Total returned qty across ALL returns for the same purchase line
+  must not exceed the originally purchased qty on that line.
+- A purchase return can be deleted. On delete:
+  - Stock is added back (returned qty goes back into stock)
+  - Supplier's balance is restored (return amount added back to owed)
+- Purchase returns cannot be edited after saving.
+  To correct, delete and re-enter.
+- At least one line with Return Quantity > 0 is required to save.
+
+
+==============================================================
+SECTION 19 — DASHBOARD
+==============================================================
+
+Home screen summary showing:
+- Today's Sales total (invoices dated today)
+- Total Customer Dues (sum of all customer balances)
+- Cash Balance (net cash received - cash expenses - cash supplier payments
+               - cash→bank transfers)
+- UPI Balance (net UPI received - UPI expenses - UPI supplier payments
+              - UPI→bank transfers)
+- Bank Balance (net bank received - bank expenses - bank supplier payments
+              + cash→bank transfers + UPI→bank transfers)
+- Count of Low Stock items (stock between 1 and 5 inclusive)
+  (items with stock <= 0 are Out of Stock, shown separately
+  only if the Out of Stock count is > 0)
+- Recent 5 Invoices table (number, customer, total, balance)
+- Low Stock Items table (name, category, stock count) — up to 8 items
+
+
+==============================================================
+SECTION 20 — REPORTS SCREEN
+==============================================================
+
+Overall summary (all time):
+- Total Sales (sum of Grand Total after Final Discount, all invoices)
+- Total Sales Returns (sum of all sales return totals)
+- Net Sales (Total Sales - Total Sales Returns)
+- Total GST Collected
+- Total Amount Received
+- Total Customer Dues
+- Cash Balance
+- UPI Balance
+- Bank Balance
+
+HOW CASH/UPI/BANK BALANCES ARE CALCULATED:
+  Start from zero for each account.
+  ADD: Invoice payments received via that method
+  ADD: Standalone Payment-In received via that method
+  SUBTRACT: Expenses paid via that method
+  SUBTRACT: Supplier payments (Payment-Out) via that method
+  SUBTRACT: Fund Transfers OUT of that account (Cash→Bank or UPI→Bank)
+  ADD: Fund Transfers IN to that account (only Bank receives transfers)
+
+  Full formulas:
+    Cash Balance = (Invoice Cash + Payment-In Cash)
+                 - (Cash Expenses + Payment-Out Cash)
+                 - (Cash → Bank Transfers)
+
+    UPI Balance  = (Invoice UPI + Payment-In UPI)
+                 - (UPI Expenses + Payment-Out UPI)
+                 - (UPI → Bank Transfers)
+
+    Bank Balance = (Invoice Bank + Payment-In Bank)
+                 - (Bank Expenses + Payment-Out Bank)
+                 + (Cash → Bank Transfers)
+                 + (UPI → Bank Transfers)
+
+
+==============================================================
+SECTION 21 — GST SUMMARY (Invoice Output Only)
+==============================================================
+
+This is NOT a tax filing report. It is a simple summary
+of GST amounts collected on invoices for personal reference.
+
+Date range filter.
+
+GST SUMMARY TABLE:
+  Groups all invoices in the selected period by GST rate.
+
+  GST Rate | Taxable Amount | GST Amount | Line Total
+  0%       |                |            |
+  5%       |                |            |
+  12%      |                |            |
+  18%      |                |            |
+  28%      |                |            |
+  TOTAL    |                |            |
+
+  Taxable Amount = sum of all taxable amounts for that GST rate
+  GST Amount     = sum of all GST amounts for that GST rate
+  Line Total     = Taxable Amount + GST Amount
+
+Sales returns in the period reduce the totals.
+The table shows what was collected — no filing logic involved.
+
+Invoice-wise detail toggle (optional view):
+  Invoice No | Date | Customer | Taxable | GST | Total
+
+
+
+==============================================================
+SECTION 22 — PROFIT & LOSS REPORT
+==============================================================
+
+Date range filter.
+
+Calculations:
+  Revenue          = Sum of Grand Total after Final Discount
+                     for all invoices in period
+  Sales Returns    = Sum of sales return totals in period
+  Net Revenue      = Revenue - Sales Returns
+  Cost of Goods    = Sum of purchase bill totals in period
+                   - Sum of purchase return totals in period
+  Gross Profit     = Net Revenue - Cost of Goods
+  Total Expenses   = Sum of all expenses in period
+  Net Profit       = Gross Profit - Total Expenses
+
+Expense breakdown table:
+  Category | Total Amount | % of Total Expenses
+
+
+==============================================================
+SECTION 23 — BALANCE SHEET
+==============================================================
+
+Assets:
+  - Cash balance (calculated per Section 20 formula)
+  - UPI balance (calculated per Section 20 formula)
+  - Bank balance (calculated per Section 20 formula)
+  - Inventory Value (sum of: current stock × Purchase Price
+    for each product; Purchase Price is the product's stored
+    last known purchase rate from Section 3;
+    products with no purchase history use 0 as value)
+  - Total Customer Receivables (sum of all customer balances due)
+  Total Assets = Cash + UPI + Bank + Inventory + Receivables
+
+Liabilities:
+  - Total Supplier Payables (sum of all supplier balances due)
+  Total Liabilities = sum of above
+
+Net Worth (Equity):
+  Net Worth = Total Assets - Total Liabilities
+
+
+==============================================================
+SECTION 24 — RECEIVABLES & PAYABLES (Aging Report)
+==============================================================
+
+RECEIVABLES (Customers who owe money):
+  Shows each customer with a positive balance, broken into
+  aging buckets based on the oldest unpaid invoice date:
+
+  Customer | 0-30 days | 31-60 days | 61-90 days | 90+ days | Total
+
+  Only customers with a positive balance are shown.
+  The aging bucket is determined by how old the invoice is
+  relative to today.
+
+PAYABLES (Suppliers we owe money to):
+  Shows each supplier with a positive balance, broken into
+  aging buckets based on the oldest unpaid purchase bill date:
+
+  Supplier | 0-30 days | 31-60 days | 61-90 days | 90+ days | Total
+
+  Only suppliers with a positive balance are shown.
+
+Both tables show totals at the bottom row.
+
+
+==============================================================
+SECTION 25 — MONEY LEDGER
+==============================================================
+
+A running transaction register for Cash, UPI, and Bank accounts.
+
+Each row has:
+- Date
+- Account (Cash / UPI / Bank)
+- Type (Invoice Payment / Receive Balance / Payment-In /
+  Expense / Payment-Out / Fund Transfer)
+- Details (invoice number + customer name, or expense category,
+  or "Cash → Bank transfer", "UPI → Bank transfer", etc.)
+- Money In amount
+- Money Out amount
+- Running Balance for that account
+
+Fund Transfer entries appear as TWO rows in the ledger:
+  1. Money Out row on the source account (Cash or UPI)
+  2. Money In row on the Bank account
+  Both rows share the same reference note for traceability.
+
+Filter: Show All accounts, or only Cash, or only UPI, or only Bank.
+
+
+==============================================================
+SECTION 26 — CUSTOMER LEDGER
+==============================================================
+
+Select a customer and optional date range.
+Shows all transactions for that customer in date order:
+
+Entry types:
+- Opening Balance (debit = old pending)
+- Sale Invoice (debit = Grand Total after Final Discount)
+- Invoice Payment - Cash/UPI/Bank (credit = amount paid)
+  (includes payments from invoice save AND Receive Balance action)
+- Payment-In - Cash/UPI/Bank (credit = standalone payment)
+- Sales Return (credit = return total, reduces what customer owes)
+- Sale Order (shown for reference only, does NOT affect balance)
+
+Rules:
+- Running balance starts at 0, then opening balance is applied first.
+- Entries are sorted by date ascending, then by entry time.
+- If balance goes below 0 due to returns, show 0 (minimum 0).
+
+Columns: Date | Type | Reference | Debit | Credit | Running Balance | Note
+
+Summary shown above the table:
+- Total Billed + Opening
+- Total Received
+- Current Balance
+
+
+==============================================================
+SECTION 27 — SUPPLIER LEDGER
+==============================================================
+
+Select a supplier and optional date range.
+Shows all transactions for that supplier:
+
+Entry types:
+- Opening Balance (debit = old amount owed)
+- Purchase Bill (debit = bill total)
+- Payment-Out (credit = payment made to supplier)
+- Purchase Return (credit = return total, reduces what is owed)
+
+Rules:
+- Running balance starts at 0, then opening balance is applied first.
+- Entries are sorted by date ascending, then by entry time.
+- If balance goes below 0 due to returns, show 0 (minimum 0).
+
+Columns: Date | Type | Reference | Debit | Credit | Running Balance | Note
+
+Summary: Total Purchased | Total Paid | Balance
+
+
+==============================================================
+SECTION 28 — AUDIT LOG
+==============================================================
+
+A log of all significant actions taken in the software,
+stored automatically (no user input needed).
+
+Each entry has:
+- Timestamp (date and time)
+- Action label (e.g. "Invoice saved", "Product deleted")
+- Details (e.g. invoice number, product name, email)
+
+Maximum 500 entries kept (oldest are removed automatically).
+
+Actions logged include:
+- Invoice saved / updated / deleted
+- Invoice payment received (Receive Balance action)
+- Invoice shared as PDF
+- Product added / updated / deleted / imported from CSV
+- Customer added / updated / deleted
+- Supplier added / updated / deleted
+- Purchase bill saved / edited / deleted
+- Expense saved / deleted
+- Payment-In received / deleted
+- Payment-Out saved / deleted
+- Sale order saved / edited / deleted
+- Sales return saved / deleted
+- Purchase return saved / deleted
+- Stock adjusted / adjustment deleted
+- Quotation saved / edited / deleted
+- Estimate saved / edited / deleted
+- Delivery Challan saved / edited / deleted
+- Fund transfer saved / deleted
+- Company settings saved
+- Cloud sign up / sign in / sign out / upload / download
+- Backup export / import
+
+
+==============================================================
+SECTION 29 — BARCODE LABEL PRINTING
+==============================================================
+
+Select a product and number of labels to print.
+Build a queue of multiple products.
+Print all labels at once.
+
+Each printed label shows:
+- Product name (bold)
+- Sale Price (MRP)
+- Barcode (Code 39 format, using the QR/barcode field value)
+- The barcode text below the barcode
+
+Labels are printed in a grid layout.
+
+
+==============================================================
+SECTION 30 — SYNC & BACKUP (Cloud + Local)
+==============================================================
+
+LOCAL BACKUP:
+  Export: Downloads all data as a single JSON file to the
+          computer. File is named with today's date.
+  Import: Upload a previously exported JSON backup file.
+          Restores all data from that file.
+
+  BACKUP IMPORT RULES:
+  - The JSON file is validated before any data is overwritten.
+  - If the file is missing required sections, is corrupt, or
+    cannot be parsed, show an error and do NOT touch existing data.
+  - If valid, all existing data is replaced with the backup data.
+  - User must confirm before import proceeds:
+    "This will replace ALL current data. Are you sure?"
+
+PRODUCT CSV IMPORT:
+  Upload a CSV file to bulk-import products.
+  Required columns: name, sale_price, gst, discount, stock, qr
+  (sale_price = the MRP, GST-inclusive price)
+  Optional columns: category, description
+
+  QR column rules:
+  - qr is REQUIRED in the CSV because every product must have
+    a unique QR / barcode value.
+  - If a row is missing the qr column or has a blank qr value,
+    the row is skipped with a warning.
+  - If a qr value in the CSV matches an existing product,
+    that product is UPDATED (not duplicated).
+  - If the qr value is new, a new product is created.
+
+
+UNIQUE ID REQUIREMENT (critical for sync):
+  Every record in every table (invoice, product, customer,
+  supplier, expense, payment-in, payment-out, sale order,
+  purchase bill, sales return, purchase return, stock
+  adjustment, quotation, estimate, delivery challan,
+  fund transfer) MUST have a UUID (Universally Unique ID)
+  generated on the DEVICE at the time of creation.
+
+  Rule: The UUID is generated locally (e.g. using uuid v4),
+  NOT assigned by the server. This ensures two devices can
+  each create records simultaneously without ID collision.
+
+  UUID format: standard UUID v4, e.g.
+    "550e8400-e29b-41d4-a716-446655440000"
+
+  Every record also has:
+    - id         (UUID, generated on device, never changes)
+    - user_id    (the signed-in user's Supabase user ID)
+    - created_at (timestamp when first created on device)
+    - updated_at (timestamp of last modification, used for sync)
+    - is_deleted (boolean, default false; set to true on delete
+                  instead of physically removing the record)
+
+  WHY is_deleted instead of real delete:
+  If Device A deletes a record and Device B still has it,
+  a real delete would be invisible to Device B. With is_deleted,
+  the "deleted" status syncs to all devices so Device B
+  also removes the record from its view.
+
+CLOUD SYNC (Supabase):
+  Setup:
+  1. User creates a free Supabase project
+  2. Pastes their Supabase Project URL into the app
+  3. Pastes their Supabase public anon key into the app
+  4. Clicks "Save Connection"
+  5. Creates an account (first time) or Signs In
+
+  Sign Up: Creates a new account using email + password
+  Sign In: Logs in with email + password
+  Sign Out: Logs out. Shows login screen next time.
+
+  Save Online Now: Uploads all local changes to Supabase cloud
+  Load Online Data: Downloads all cloud records to this device
+  Auto Sync: After any change, app uploads ONLY the changed
+             record to cloud after a 3-second debounce.
+             (3-second debounce = if user makes multiple quick
+             changes, only the final state is uploaded once,
+             not every intermediate keystroke)
+
+  Smart Sync (on app start or resume):
+  The app compares each local record's updated_at timestamp
+  against the cloud version of the same record (matched by UUID).
+
+  PER-RECORD SYNC LOGIC:
+  For each record (matched by UUID):
+    Case 1: Record exists only on cloud → download to local
+    Case 2: Record exists only on local → upload to cloud
+    Case 3: Both exist, cloud updated_at newer → update local
+    Case 4: Both exist, local updated_at newer → update cloud
+    Case 5: Both exist, same updated_at → no action needed
+    Case 6: Record is_deleted=true on cloud → mark deleted locally
+    Case 7: Record is_deleted=true on local → mark deleted on cloud
+
+  SIMULTANEOUS USE SAFETY:
+  Because every record has a UUID and syncs individually:
+    - Device A creating Invoice #100 and Device B creating
+      Invoice #101 at the same time will NOT conflict.
+      After sync, BOTH devices will have both invoices.
+    - No data is ever lost from simultaneous saves.
+    - Only if BOTH devices edit the SAME record (same UUID)
+      at the same time is there a conflict (Case 3 or 4 above).
+      In that case, the record with the newer updated_at wins.
+      The user should be warned: "This record was updated on
+      another device. Showing the most recent version."
+
+  INVOICE NUMBER UNIQUENESS ACROSS DEVICES:
+  Invoice numbers (not UUIDs) must still be unique globally.
+  To prevent two devices generating the same number:
+    - On sync, check all invoice numbers across all devices.
+    - If a duplicate number is found after sync, mark the
+      newer one (by created_at) with a "-DUP" suffix and
+      show a warning: "Duplicate invoice number detected:
+      [number]. Please edit and assign a unique number."
+    - The older invoice keeps its original number.
+
+  Test Connection: Checks if Supabase URL and key are valid.
+
+  Cloud storage tables (each record has id, user_id, updated_at,
+  created_at, is_deleted, and a data column or individual columns):
+    - business_settings
+    - products
+    - customers
+    - invoices
+    - invoice_payments (stores each Receive Balance payment)
+    - sale_orders
+    - purchases
+    - expenses
+    - suppliers
+    - payment_outs
+    - payment_ins
+    - estimates
+    - delivery_challans
+    - sales_returns
+    - purchase_returns
+    - quotations
+    - fund_transfers
+    - stock_adjustments
+    - audit_logs
+
+  Session (login token) is refreshed automatically before expiry.
+
+
+==============================================================
+SECTION 31 — USER INTERFACE RULES
+==============================================================
+
+Navigation:
+  Left sidebar with menu items grouped as:
+    SALE group:
+      - Dashboard
+      - Sale Invoice (Billing)
+      - Sale Order
+      - Invoices (list)
+      - Payment-In
+      - Sales Return
+      - Quotation
+
+    PURCHASE group:
+      - Purchase Bill
+      - Payment-Out
+      - Purchase Return
+
+    BUSINESS group:
+      - Products
+      - Customers
+      - Suppliers
+      - Inventory
+      - Stock Adjustment
+      - Expenses
+      - Fund Transfer
+      - Estimates
+      - Delivery Challans
+
+    REPORTS group:
+      - Reports (Overview)
+      - GST Summary
+      - Profit & Loss
+      - Balance Sheet
+      - Receivables/Payables
+      - Customer Ledger
+      - Supplier Ledger
+      - Money Ledger
+
+    OTHER:
+      - Barcode Labels
+      - Audit Log
+      - Sync & Backup
+      - Settings (Company)
+
+Top bar shows:
+  - Invoice count
+  - Cloud connection status (Local only / Cloud connected)
+  - Login / Account button
+  - Dark/Light theme toggle
+
+Theme: App supports dark mode and light mode toggle.
+
+Mobile / Responsive:
+  On small screens (phone), sidebar is hidden.
+  A floating button (hamburger ☰) appears at bottom-right.
+  Tapping it shows the full menu.
+  Tapping any menu item closes the menu.
+
+Delete protection:
+  Products, Customers, and Suppliers cannot be deleted
+  if they have any linked history (invoices, purchases,
+  payments, stock adjustments, etc.).
+  A clear error message is shown explaining which records
+  are blocking the delete.
+
+Invoices with payments cannot be deleted directly.
+The user must first zero out the paid amounts, then delete.
+
+
+==============================================================
+SECTION 32 — DATA RULES & VALIDATION
+==============================================================
+
+All money amounts default to 0 if left blank or invalid.
+All percentages default to 0 if left blank.
+Stock quantities default to 0.
+
+GLOBAL RECORD STRUCTURE (applies to every single record in the app):
+  Every record of every type (invoice, product, customer,
+  expense, payment, order, etc.) must have these system fields:
+    - id         : UUID v4, generated on device at creation time
+    - user_id    : the signed-in user's Supabase auth ID
+    - created_at : ISO timestamp when record was first created
+    - updated_at : ISO timestamp updated every time record is modified
+    - is_deleted : boolean (default false; true = soft-deleted)
+
+  is_deleted=true records are EXCLUDED from:
+    - All screens and lists
+    - All stock calculations
+    - All balance calculations
+    - All report totals
+  They are retained in the database only for sync purposes.
+
+  Note: "Delete" in every section of this spec means setting
+  is_deleted=true (soft delete), not physically removing the row.
+
+REQUIRED FIELDS (saving is blocked if these are missing):
+
+  PRODUCT:
+    - Name: cannot be blank
+    - QR / Barcode: cannot be blank; must be unique
+    - Sale Price (MRP): must be >= 0
+    - GST Rate: must be 0, 5, 12, 18, or 28
+    - Default Discount %: must be 0-100
+    - Opening Stock: must be >= 0
+
+  CUSTOMER:
+    - Name: cannot be blank
+    - Phone (if provided): must be 10 digits
+    - GSTIN (if provided): must be 15 alphanumeric chars
+    - Opening Balance: must be >= 0 (defaults to 0)
+
+  SUPPLIER:
+    - Name: cannot be blank
+    - Phone (if provided): must be 10 digits
+    - GSTIN (if provided): must be 15 alphanumeric chars
+    - Opening Balance: must be >= 0 (defaults to 0)
+
+  INVOICE:
+    - Invoice Number: cannot be blank; must be unique
+    - Date: cannot be blank
+    - At least one item line is required
+    - Each item line: Quantity > 0, Rate >= 0 (Rate = line price)
+    - Each item line: Discount % between 0 and 100
+    - Each item line: GST % must be 0, 5, 12, 18, or 28
+    - Final Discount: must be >= 0 and <= Grand Total
+    - Total paid (Cash + UPI + Bank): cannot exceed
+      Grand Total after Final Discount
+    - Balance Due: cannot be negative
+
+  PURCHASE BILL:
+    - Bill Number: cannot be blank; must be unique across all purchase bills
+    - Date: cannot be blank
+    - Supplier name: cannot be blank
+    - At least one item line is required
+    - Each item line: Quantity > 0, Rate >= 0
+    - Each item line: GST % must be 0, 5, 12, 18, or 28
+    - Total paid: cannot exceed Grand Total
+    - Balance Due: cannot be negative
+
+  EXPENSE:
+    - Date: cannot be blank
+    - Category: cannot be blank
+    - Amount: must be > 0
+    - Payment Method: must be selected (Cash / UPI / Bank)
+
+  PAYMENT-IN:
+    - Customer: must be selected
+    - Date: cannot be blank
+    - Amount: must be > 0
+    - Method: must be selected (Cash / UPI / Bank)
+
+  PAYMENT-OUT:
+    - Supplier: must be selected
+    - Date: cannot be blank
+    - Amount: must be > 0
+    - Method: must be selected (Cash / UPI / Bank)
+
+  SALE ORDER:
+    - Date: cannot be blank
+    - At least one item line is required
+    - Each item line: Quantity > 0, Rate >= 0
+
+  STOCK ADJUSTMENT:
+    - Product: must be selected
+    - Date: cannot be blank
+    - Quantity Change: must not be zero
+    - Reason: cannot be blank
+
+  SALES RETURN:
+    - Original Invoice: must be selected
+    - Date: cannot be blank
+    - At least one line with Return Quantity > 0
+    - Return Quantity per line: must be > 0 and <=
+      (originally sold qty - already returned qty for that line)
+
+  PURCHASE RETURN:
+    - Original Purchase Bill: must be selected
+    - Date: cannot be blank
+    - At least one line with Return Quantity > 0
+    - Return Quantity per line: must be > 0 and <=
+      (originally purchased qty - already returned qty for that line)
+
+  FUND TRANSFER:
+    - Transfer From: must be selected (Cash or UPI)
+    - Date: cannot be blank
+    - Amount: must be > 0
+
+  QUOTATION:
+    - Date: cannot be blank
+    - At least one item line is required
+    - Quotation Number must be unique across all quotations
+    - Valid Until date must be on or after Date
+
+  ESTIMATE:
+    - Date: cannot be blank
+    - At least one item line is required
+    - Estimate Number must be unique across all estimates
+
+  DELIVERY CHALLAN:
+    - Date: cannot be blank
+    - At least one item line is required
+    - Challan Number must be unique across all challans
+
+GENERAL NUMERIC RULES:
+  - All blank numeric inputs are treated as 0.
+  - Non-numeric inputs in number fields are treated as 0.
+  - All money values are rounded to 2 decimal places.
+  - All GST calculations use standard rounding (round half up).
+  - Percentages are stored as numbers (e.g., 18 not 0.18).
+
+
+==============================================================
+SECTION 33 — STOCK CALCULATION (FULL FORMULA)
+==============================================================
+
+For any product, current stock is always calculated live
+from all related records:
+
+  Current Stock =
+    Opening Stock (set when product was created or last edited)
+    + Total Purchased (sum of qty from all purchase bill lines
+      for this product, where is_deleted=false)
+    - Total Sold (sum of qty from all invoice lines
+      for this product, where is_deleted=false)
+    + Total Sales Returns (qty returned by customers
+      for this product, where is_deleted=false)
+    - Total Purchase Returns (qty returned to suppliers
+      for this product, where is_deleted=false)
+    + Net Stock Adjustments (sum of all qtyChange values
+      for this product, where is_deleted=false;
+      positive = added, negative = removed)
+
+This means stock is never stored as a fixed number —
+it is always computed fresh from all live transactions.
+
+Current Stock can be 0 but NEVER goes below 0 in display.
+If calculation yields a negative number, show 0 and flag
+the product as "Stock Error" for the user to investigate.
+
+When editing a product's opening stock, the formula adjusts
+the opening stock so that the visible "current stock" matches
+what the user types as the new current stock value:
+
+  Rearranging the stock formula:
+  Current Stock = Opening Stock + Purchased - Sold
+                + Sales Returns - Purchase Returns + Net Adjustments
+
+  Solving for Opening Stock:
+  New Opening Stock = Typed Current Stock
+                    - Purchased
+                    + Sold
+                    - Sales Returns
+                    + Purchase Returns
+                    - Net Adjustments
+
+  Example: Product has Purchased=10, Sold=3, no returns,
+  no adjustments. User types current stock as 8.
+  New Opening Stock = 8 - 10 + 3 - 0 + 0 - 0 = 1
+  Check: 1 + 10 - 3 = 8 ✓
+
+
+==============================================================
+SECTION 34 — INVOICE NUMBER AUTO-GENERATION
+==============================================================
+
+Formula:
+  Invoice Number = Prefix + Separator + Padded Sequence + Suffix
+
+Example settings:
+  Prefix = INV
+  Separator = -
+  Padding = 4
+  Start Number = 1
+  Suffix = (blank)
+
+  Result: INV-0001, INV-0002, ..., INV-0100
+
+Another example:
+  Prefix = GST
+  Separator = /
+  Padding = 3
+  Start = 1
+  Suffix = /2024-25
+
+  Result: GST/001/2024-25
+
+Sequence = the next number after the highest invoice number
+sequence value used so far (not a simple count of invoices).
+
+Reason: Simple count breaks after deletions. Using the highest
+existing sequence prevents duplicate numbers.
+
+Example: INV-0001, INV-0002, INV-0003 saved. INV-0002 deleted.
+Count = 2, but highest sequence = 3, so next = INV-0004. ✓
+
+AUTO-GENERATION RULES:
+  - Sequence increments by 1 for each new invoice saved.
+  - If Financial Year Reset is ON, the sequence resets to
+    Start Number on the 1st of April each year.
+  - Deleted invoices do NOT free up their number for reuse.
+    The sequence continues from the highest used number.
+
+MANUAL EDIT RULES:
+  - The user may manually type any invoice number.
+  - The manually entered number must be unique. If it matches
+    any existing saved invoice, show error and block save.
+  - After saving a manually entered number, the next
+    auto-generated number continues from the highest
+    existing sequence number (not from the manual number).
+  - If the user clears the invoice number field, the app
+    auto-fills the next sequence number before save.
+
+
+==============================================================
+SECTION 35 — CAMERA BARCODE SCANNER
+==============================================================
+
+The app can use the device's camera to scan barcodes.
+Supported formats: QR Code, Code 128, EAN-13.
+
+When a barcode is detected:
+  1. Camera stops scanning automatically
+  2. The detected barcode value is looked up in the product list
+  3. If found, the product is added to the current invoice
+  4. If not found, user is shown an error message
+
+USB / manual barcode scanner:
+  User types or scans the barcode code into the QR input field.
+  Press Enter to add the matching product to the invoice.
+
+
+==============================================================
+SECTION 36 — INVOICE PRINTING / TEMPLATES
+==============================================================
+
+When printing an invoice, the selected invoice template style
+is used. Templates include:
+  - Classic (basic table layout)
+  - Other styles (configurable)
+
+Print content includes:
+  - Company logo (if uploaded)
+  - Company name, address, phone, GSTIN
+  - Invoice number and date
+  - Customer name, address, GSTIN (if available)
+  - Items table (name, qty, rate, discount%, GST%, line total)
+  - Subtotal, Total Discount, Total GST
+  - Grand Total
+  - Final Discount (if any)
+  - Grand Total after Final Discount
+  - Amount Paid (Cash / UPI / Bank)
+  - Balance Due
+  - Payment terms / note
+  - Authorized signature (if uploaded)
+
+A "Preview Template" button lets the user see how the
+selected template looks before printing.
+
+
+==============================================================
+SECTION 37 — MULTI-DEVICE SYNC RULES
+==============================================================
+
+Gonabhavi supports simultaneous use on multiple devices
+(Windows desktop + Android phone, for example) by using
+per-record UUID sync through Supabase. This means:
+- Each device can create, edit, and delete records independently
+- Changes sync to all other signed-in devices automatically
+- No data is lost even if two devices are used at the same time
+
+HOW TO SET UP A SECOND DEVICE:
+  1. Install the app on the second device
+  2. Enter the SAME Supabase URL and anon key as the first device
+  3. Sign In with the SAME email and password
+  4. Tap "Load Online Data" to download all existing records
+  5. The second device is now in sync
+
+AUTO SYNC BEHAVIOUR (while signed in):
+  - Every time a record is created, edited, or deleted on this
+    device, that specific record is uploaded to cloud within
+    3 seconds (debounced — rapid changes are batched into one upload)
+  - On app start and every 5 minutes, the app runs a Smart Sync
+    to pull down any records that changed on other devices
+
+SMART SYNC ON APP START:
+  When the app opens or resumes from background:
+  1. Fetch all records from cloud that have updated_at newer
+     than the device's last sync timestamp
+  2. For each fetched record, apply the per-record sync logic
+     (see Section 30 for the 7-case logic)
+  3. Update the device's last sync timestamp to now
+
+SIMULTANEOUS EDIT RULES:
+  - Two devices creating DIFFERENT records: No conflict.
+    After sync both devices will have all records.
+  - Two devices editing the SAME record simultaneously:
+    The record with the newer updated_at timestamp wins.
+    A warning is shown: "This record was updated on another
+    device. The most recent version has been applied."
+  - Two devices generating invoice numbers simultaneously:
+    On sync, if a duplicate invoice number is found,
+    the newer-created invoice is flagged with "-DUP" suffix
+    and the user is asked to assign a unique number.
+    The older invoice keeps its original number.
+
+DELETE SYNC:
+  Deletes use is_deleted=true (soft delete) so that
+  the deletion syncs to all devices. A deleted record with
+  is_deleted=true is hidden from all screens but kept in
+  the database for sync consistency. Records with is_deleted=true
+  are excluded from ALL stock calculations, balance calculations,
+  and report totals.
+
+OFFLINE USE:
+  The app works fully offline. All data is stored locally.
+  When internet becomes available, Auto Sync will upload
+  any pending changes automatically.
+  The offline queue retains all changes made while offline
+  and uploads them in chronological order when reconnected.
+
+DATA ISOLATION:
+  Data belongs to the signed-in user (user_id).
+  Multiple users using the same Supabase project have
+  completely separate data — no user can see another's records.
+
+
+==============================================================
+SECTION 38 — ESTIMATES & DELIVERY CHALLANS
+==============================================================
+
+Both follow a similar structure to invoices but have NO
+effect on stock, customer balance, or supplier balance.
+
+ESTIMATE:
+  Purpose: A draft price quote before the sale is confirmed.
+  Number format: auto (EST-0001, EST-0002...)
+  Fields:
+  - Estimate Number (auto-generated)
+  - Date
+  - Customer (optional)
+  - Items (product, qty, rate, discount, GST — same as invoice)
+  - Note
+  - Total amount (calculated, not stored as balance)
+
+  Actions:
+  - Save Estimate
+  - Edit Estimate
+  - Convert to Invoice: Copies all lines to a new invoice
+  - Delete Estimate
+
+  Rules:
+  - Does NOT reduce stock
+  - Does NOT affect customer balance
+  - At least one item line required to save
+  - Estimate Number must be unique across all estimates
+
+DELIVERY CHALLAN:
+  Purpose: Records goods dispatched to a customer without
+  a billing invoice (goods sent on approval, sample, etc.)
+  Number format: auto (DC-0001, DC-0002...)
+  Fields:
+  - Challan Number (auto-generated)
+  - Date
+  - Customer (optional)
+  - Items (product, qty — no pricing required)
+  - Note
+
+  Actions:
+  - Save Delivery Challan
+  - Edit Delivery Challan
+  - Delete Delivery Challan
+
+  Rules:
+  - Does NOT reduce stock
+  - Does NOT affect customer balance
+  - At least one item line required to save
+  - Challan Number must be unique across all challans
+
+
+==============================================================
+END OF SPECIFICATION
+==============================================================
+This document covers all features present in the Gonabhavi
+software as of May 2026, including all recent additions.
+
+When rebuilding in a new language/framework, critical rules:
+
+1. Use Supabase as the database backend (already set up).
+   See Section 30 for full cloud table structure.
+
+2. Build a responsive web app (desktop + mobile browser).
+   For Android: use the same web app in a WebView wrapper,
+   or use Flutter/React Native with the same Supabase backend.
+
+3. PRICING RULE (non-negotiable):
+   Sale Price (MRP) = always GST-INCLUSIVE. No toggle.
+   Purchase Price    = always BEFORE TAX. GST is added on top.
+   See Section 6 for full invoice line calculation.
+
+4. GST IS FOR INVOICE OUTPUT ONLY. There is no GSTR-1/GSTR-3B
+   filing logic. Section 21 provides a simple GST summary only.
+
+5. EVERY RECORD needs a UUID (generated on device), an
+   is_deleted flag (soft delete), and updated_at timestamp.
+   This enables safe simultaneous multi-device use.
+   See Section 30 and Section 37 for full sync rules.
+   STOCK is NEVER stored. It is computed live (Section 33).
+
+6. BALANCE FORMULAS:
+   - Customer balance accounts for sales returns (Section 4).
+   - Supplier balance accounts for purchase returns (Section 5).
+   - Cash/UPI/Bank accounts for fund transfers (Section 20).
+
+7. VALIDATION: Every save action must pass ALL rules in
+   Section 32. No data should be saved with missing or
+   invalid required fields.
+
+8. INVOICE NUMBER must be unique at all times.
+   Auto-generation and manual edit both enforce uniqueness.
+   See Section 34.
+
+9. DELETE SAFETY:
+   - Invoices with payments cannot be deleted directly.
+   - Products/Customers/Suppliers with linked data cannot be deleted.
+   - All deletes have clear user-facing error messages.
+   - All returns (Sales/Purchase) can be deleted but must
+     reverse their effect on stock and balances.
+==============================================================

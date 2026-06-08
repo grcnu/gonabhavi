@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gonabhavi — Premium Accounting & Billing Software</title>
+  
+  <!-- Premium Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+  
+  <!-- Icon & Library CDNs (Production versions) -->
+  <script src="https://cdn.jsdelivr.net/npm/lucide@0.395.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.8/dist/umd/supabase.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrious@4.0.2/dist/qrious.min.js"></script>
+  
+  <!-- Base Application Stylesheet -->
+  <link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+
+  <!-- Premium Ambient Soothing Glowing Blobs -->
+  <div class="ambient-glow bg-glow-1"></div>
+  <div class="ambient-glow bg-glow-2"></div>
+  <div class="ambient-glow bg-glow-3"></div>
+
+  <!-- Main App Container -->
+  <div class="app-container">
+    
+    <!-- Sidebar Navigation -->
+    <aside class="app-sidebar" id="app-sidebar">
+      <div class="sidebar-header">
+        <div class="brand">
+          <img src="/src/logo.png" alt="Gonabhavi" class="brand-full-logo">
+          <div class="brand-mini-logo-container">
+            <div class="brand-logo" style="margin: 0;">G</div>
+          </div>
+        </div>
+        <button class="sidebar-collapse-btn" id="sidebar-collapse-btn" title="Collapse Sidebar">
+          <i data-lucide="chevron-left"></i>
+        </button>
+      </div>
+      
+      <nav class="sidebar-nav">
+        <!-- DASHBOARD GROUP -->
+        <div class="nav-group">
+          <div class="nav-group-header" style="display: none;">
+            <span class="nav-group-title">Dashboard</span>
+          </div>
+          <div class="nav-group-links">
+            <a href="#dashboard" class="nav-link active" data-view="dashboard">
+              <i data-lucide="layout-dashboard"></i>
+              <span>Dashboard</span>
+            </a>
+          </div>
+        </div>
+
+        <!-- SALE GROUP -->
+        <div class="nav-group">
+          <div class="nav-group-header">
+            <span class="nav-group-title">Sale</span>
+            <i data-lucide="chevron-down" class="nav-group-chevron"></i>
+          </div>
+          <div class="nav-group-links">
+            <a href="#billing" class="nav-link" data-view="billing">
+              <i data-lucide="calculator"></i>
+              <span>Sale Invoice</span>
+            </a>
+            <a href="#invoices" class="nav-link" data-view="invoices">
+              <i data-lucide="receipt"></i>
+              <span>Invoices List</span>
+            </a>
+            <a href="#sale-order" class="nav-link" data-view="sale-order">
+              <i data-lucide="shopping-cart"></i>
+              <span>Sale Order</span>
+            </a>
+            <a href="#payment-in" class="nav-link" data-view="payment-in">
+              <i data-lucide="arrow-down-left"></i>
+              <span>Payment-In</span>
+            </a>
+            <a href="#quotations" class="nav-link" data-view="quotations">
+              <i data-lucide="file-text"></i>
+              <span>Quotation</span>
+            </a>
+            <a href="#sales-return" class="nav-link" data-view="sales-return">
+              <i data-lucide="undo-2"></i>
+              <span>Sale Return</span>
+            </a>
+          </div>
+        </div>
+
+        <!-- PRODUCTS GROUP -->
+        <div class="nav-group">
+          <div class="nav-group-header">
+            <span class="nav-group-title">Products</span>
+            <i data-lucide="chevron-down" class="nav-group-chevron"></i>
+          </div>
+          <div class="nav-group-links">
+            <a href="#products" class="nav-link" data-view="products">
+              <i data-lucide="package"></i>
+              <span>Products Master</span>
+            </a>
+            <a href="#stock-adjustment" class="nav-link" data-view="stock-adjustment">
+              <i data-lucide="sliders-horizontal"></i>
+              <span>Stock Adjustment</span>
+            </a>
+            <a href="#delivery-challans" class="nav-link" data-view="delivery-challans">
+              <i data-lucide="package-check"></i>
+              <span>Delivery Challans</span>
+            </a>
+          </div>
+        </div>
+
+        <!-- PURCHASE GROUP -->
+        <div class="nav-group restricted-purchases">
+          <div class="nav-group-header">
+            <span class="nav-group-title">Purchases</span>
+            <i data-lucide="chevron-down" class="nav-group-chevron"></i>
+          </div>
+          <div class="nav-group-links">
+            <a href="#purchase-bill" class="nav-link" data-view="purchase-bill">
+              <i data-lucide="truck"></i>
+              <span>Purchase Bill</span>
+            </a>
+            <a href="#purchase-ledger" class="nav-link" data-view="purchase-ledger">
+              <i data-lucide="list-checks"></i>
+              <span>Purchase Ledger</span>
+            </a>
+            <a href="#payment-out" class="nav-link" data-view="payment-out">
+              <i data-lucide="arrow-up-right"></i>
+              <span>Payment-Out</span>
+            </a>
+            <a href="#purchase-return" class="nav-link" data-view="purchase-return">
+              <i data-lucide="undo"></i>
+              <span>Purchase Return</span>
+            </a>
+          </div>
+        </div>
+
+        <!-- BUSINESS GROUP -->
+        <div class="nav-group">
+          <div class="nav-group-header">
+            <span class="nav-group-title">Business Masters</span>
+            <i data-lucide="chevron-down" class="nav-group-chevron"></i>
+          </div>
+          <div class="nav-group-links">
+            <a href="#customers" class="nav-link" data-view="customers">
+              <i data-lucide="users"></i>
+              <span>Customers Master</span>
+            </a>
+            <a href="#suppliers" class="nav-link" data-view="suppliers">
+              <i data-lucide="briefcase"></i>
+              <span>Suppliers Master</span>
+            </a>
+            <a href="#expenses" class="nav-link restricted-expenses" data-view="expenses">
+              <i data-lucide="wallet"></i>
+              <span>Expenses</span>
+            </a>
+            <a href="#fund-transfer" class="nav-link" data-view="fund-transfer">
+              <i data-lucide="arrow-left-right"></i>
+              <span>Fund Transfer</span>
+            </a>
+            <a href="#estimates" class="nav-link" data-view="estimates">
+              <i data-lucide="clipboard-list"></i>
+              <span>Estimates</span>
+            </a>
+          </div>
+        </div>
+
+        <!-- REPORTS GROUP -->
+        <div class="nav-group restricted-reports">
+          <div class="nav-group-header">
+            <span class="nav-group-title">Financial Reports</span>
+            <i data-lucide="chevron-down" class="nav-group-chevron"></i>
+          </div>
+          <div class="nav-group-links">
+            <a href="#reports" class="nav-link" data-view="reports">
+              <i data-lucide="bar-chart-3"></i>
+              <span>Reports Overview</span>
+            </a>
+            <a href="#gst-summary" class="nav-link" data-view="gst-summary">
+              <i data-lucide="landmark"></i>
+              <span>GST Summary</span>
+            </a>
+            <a href="#profit-loss" class="nav-link" data-view="profit-loss">
+              <i data-lucide="trending-up"></i>
+              <span>Profit & Loss</span>
+            </a>
+            <a href="#balance-sheet" class="nav-link" data-view="balance-sheet">
+              <i data-lucide="scale"></i>
+              <span>Balance Sheet</span>
+            </a>
+            <a href="#receivables-payables" class="nav-link" data-view="receivables-payables">
+              <i data-lucide="hourglass"></i>
+              <span>Receivables/Payables</span>
+            </a>
+            <a href="#customer-ledger" class="nav-link" data-view="customer-ledger">
+              <i data-lucide="user-cog"></i>
+              <span>Customer Ledger</span>
+            </a>
+            <a href="#supplier-ledger" class="nav-link" data-view="supplier-ledger">
+              <i data-lucide="contact"></i>
+              <span>Supplier Ledger</span>
+            </a>
+            <a href="#money-ledger" class="nav-link" data-view="money-ledger">
+              <i data-lucide="book-open"></i>
+              <span>Money Ledger</span>
+            </a>
+          </div>
+        </div>
+
+        <!-- OTHER GROUP -->
+        <div class="nav-group">
+          <div class="nav-group-header">
+            <span class="nav-group-title">Other & Utility</span>
+            <i data-lucide="chevron-down" class="nav-group-chevron"></i>
+          </div>
+          <div class="nav-group-links">
+            <a href="#barcode-labels" class="nav-link" data-view="barcode-labels">
+              <i data-lucide="qr-code"></i>
+              <span>Barcode Labels</span>
+            </a>
+            <a href="#audit-log" class="nav-link restricted-settings" data-view="audit-log">
+              <i data-lucide="history"></i>
+              <span>Audit Log</span>
+            </a>
+            <a href="#sync-backup" class="nav-link restricted-settings" data-view="sync-backup">
+              <i data-lucide="cloud-lightning"></i>
+              <span>Sync & Backup</span>
+            </a>
+            <a href="#settings" class="nav-link restricted-settings" data-view="settings">
+              <i data-lucide="settings"></i>
+              <span>Settings</span>
+            </a>
+          </div>
+        </div>
+      </nav>
+    </aside>
+    
+    <!-- Collapsible Sidebar Overlay for mobile -->
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+    <!-- Main Working Area -->
+    <main class="app-main">
+      
+      <!-- Top Status Header -->
+      <header class="app-header">
+        <div class="header-left">
+          <button class="mobile-menu-btn" id="mobile-menu-btn" title="Toggle Sidebar">
+            <i data-lucide="menu"></i>
+          </button>
+          <button class="desktop-menu-btn no-print" id="desktop-menu-btn" title="Collapse/Expand Sidebar">
+            <i data-lucide="menu"></i>
+          </button>
+          <h1 class="view-title" id="view-title">Dashboard</h1>
+        </div>
+        
+        <div class="header-right">
+          <!-- Live Metrics Indicators -->
+          <div class="header-stats">
+            <div class="header-stat-badge" title="Total Invoices Saved">
+              <i data-lucide="file-check"></i>
+              <span id="header-invoice-count">0</span>
+            </div>
+            <div class="header-stat-badge" id="header-sync-status" title="Sync Status: Local Only">
+              <i data-lucide="cloud-off" class="cloud-icon-offline"></i>
+              <span id="sync-status-text">Local</span>
+            </div>
+          </div>
+
+          <!-- Quick Actions & Theme Control -->
+          <div class="header-actions">
+            <button class="privacy-toggle-btn" id="privacy-toggle-btn" title="Toggle Privacy Mode (Hide Balances)">
+              <i data-lucide="eye" class="eye-icon"></i>
+              <i data-lucide="eye-off" class="eye-off-icon"></i>
+            </button>
+            <button class="theme-toggle-btn" id="theme-toggle-btn" title="Toggle Light/Dark Theme">
+              <i data-lucide="sun" class="sun-icon"></i>
+              <i data-lucide="moon" class="moon-icon"></i>
+            </button>
+            
+            <!-- User Dropdown Account Button -->
+            <div class="user-profile-menu">
+              <button class="profile-btn" id="profile-dropdown-btn">
+                <div class="avatar"><i data-lucide="user"></i></div>
+                <span class="user-name-label" id="header-user-email">Offline Guest</span>
+                <i data-lucide="chevron-down" class="chevron"></i>
+              </button>
+              <div class="profile-dropdown" id="profile-dropdown">
+                <a href="#sync-backup" class="dropdown-item restricted-settings"><i data-lucide="key"></i> Supabase Setup</a>
+                <div class="dropdown-divider"></div>
+                <button class="dropdown-item text-danger" id="header-logout-btn"><i data-lucide="log-out"></i> Log Out</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <!-- View Injection Container -->
+      <section class="app-viewport" id="app-viewport">
+        <div class="loading-state">
+          <div class="spinner"></div>
+          <p>Assembling Gonabhavi modules...</p>
+        </div>
+      </section>
+    </main>
+
+    <!-- Premium Mobile Bottom Navigation Bar (Visible only on viewports < 768px) -->
+    <nav class="mobile-bottom-nav">
+      <a href="#dashboard" class="mobile-nav-link active" data-view="dashboard">
+        <i data-lucide="layout-dashboard"></i>
+        <span>Dashboard</span>
+      </a>
+      <a href="#billing" class="mobile-nav-link" data-view="billing">
+        <i data-lucide="calculator"></i>
+        <span>Billing</span>
+      </a>
+      <a href="#products" class="mobile-nav-link" data-view="products">
+        <i data-lucide="package"></i>
+        <span>Products</span>
+      </a>
+      <a href="#reports" class="mobile-nav-link restricted-reports" data-view="reports">
+        <i data-lucide="bar-chart-3"></i>
+        <span>Reports</span>
+      </a>
+      <button class="mobile-nav-link" id="mobile-menu-toggle-btn" title="Open More Menu">
+        <i data-lucide="menu"></i>
+        <span>Menu</span>
+      </button>
+    </nav>
+
+    <!-- ── Vyapar-style Floating Action Button (Mobile Only) ── -->
+    <a href="#billing" id="mobile-fab-new-invoice" class="mobile-fab" title="New Invoice">
+      <i data-lucide="plus"></i>
+    </a>
+
+  </div>
+
+  <!-- Global Modals System (Quick Add / Camera Scanning / Fund Transfers / Dialogs) -->
+  <div class="modal-system" id="modal-container"></div>
+  
+  <!-- Audio Notification Player -->
+  <audio id="sound-success" src="https://assets.mixkit.co/active_storage/sfx/2013/2013-84.wav" preload="auto"></audio>
+  <audio id="sound-error" src="https://assets.mixkit.co/active_storage/sfx/2869/2869-84.wav" preload="auto"></audio>
+
+  <!-- Application Main Entry Script -->
+  <script type="module" src="/src/app.js"></script>
+
+</body>
+</html>
