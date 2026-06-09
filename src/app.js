@@ -416,7 +416,9 @@ async function router() {
       (route === 'settings' || route === 'sync-backup' || route === 'audit-log') ||
       (!permissions.allow_purchases && (route === 'purchase-bill' || route === 'purchase-ledger' || route === 'payment-out' || route === 'purchase-return')) ||
       (!permissions.allow_reports && (route === 'reports' || route === 'gst-summary' || route === 'profit-loss' || route === 'balance-sheet' || route === 'receivables-payables' || route === 'customer-ledger' || route === 'supplier-ledger' || route === 'money-ledger' || route === 'product-margins')) ||
-      (!permissions.allow_expenses && route === 'expenses');
+      (!permissions.allow_expenses && route === 'expenses') ||
+      (!permissions.allow_fund_transfers && route === 'fund-transfer') ||
+      (!permissions.allow_stock_adjustments && route === 'stock-adjustment');
 
     if (isRestrictedRoute) {
       alert("Access Denied: Restricted to Owner role.");
@@ -690,6 +692,8 @@ export function applyStaffRestrictions() {
   toggleVisibility('.restricted-purchases', permissions.allow_purchases);
   toggleVisibility('.restricted-reports', permissions.allow_reports);
   toggleVisibility('.restricted-expenses', permissions.allow_expenses);
+  toggleVisibility('.restricted-fund-transfer', role !== 'staff' || permissions.allow_fund_transfers);
+  toggleVisibility('.restricted-stock-adjustment', role !== 'staff' || permissions.allow_stock_adjustments);
 }
 
 

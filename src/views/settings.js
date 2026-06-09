@@ -135,6 +135,8 @@ export default async function renderSettings(container) {
                 <th style="padding: 6px 8px; text-align: center;">Reports</th>
                 <th style="padding: 6px 8px; text-align: center;">Dashboard Balances</th>
                 <th style="padding: 6px 8px; text-align: center;">Delete Invoices</th>
+                <th style="padding: 6px 8px; text-align: center;">Fund Transfers</th>
+                <th style="padding: 6px 8px; text-align: center;">Stock Adjustments</th>
                 <th style="padding: 6px 8px; text-align: center; width: 60px;">Actions</th>
               </tr>
             </thead>
@@ -142,7 +144,7 @@ export default async function renderSettings(container) {
               ${(() => {
                 const staffList = settings.staff_users || [];
                 if (staffList.length === 0) {
-                  return `<tr><td colspan="7" class="text-center text-muted" style="padding: 16px;">No employee accounts configured yet.</td></tr>`;
+                  return `<tr><td colspan="9" class="text-center text-muted" style="padding: 16px;">No employee accounts configured yet.</td></tr>`;
                 }
                 return staffList.map((s, sIdx) => {
                   const perm = s.permissions || {};
@@ -163,6 +165,12 @@ export default async function renderSettings(container) {
                       </td>
                       <td style="padding: 6px 8px; text-align: center;">
                         <input type="checkbox" class="staff-perm-check" data-index="${sIdx}" data-perm="allow_delete_invoices" ${perm.allow_delete_invoices ? 'checked' : ''} style="cursor: pointer;">
+                      </td>
+                      <td style="padding: 6px 8px; text-align: center;">
+                        <input type="checkbox" class="staff-perm-check" data-index="${sIdx}" data-perm="allow_fund_transfers" ${perm.allow_fund_transfers ? 'checked' : ''} style="cursor: pointer;">
+                      </td>
+                      <td style="padding: 6px 8px; text-align: center;">
+                        <input type="checkbox" class="staff-perm-check" data-index="${sIdx}" data-perm="allow_stock_adjustments" ${perm.allow_stock_adjustments ? 'checked' : ''} style="cursor: pointer;">
                       </td>
                       <td style="padding: 6px 8px; text-align: center;">
                         <button class="btn btn-secondary btn-sm text-danger btn-delete-staff" data-index="${sIdx}" style="padding: 4px; min-height: unset; height: 24px; width: 24px; border-radius: var(--radius-xs);" title="Remove Employee"><i data-lucide="trash-2" style="width: 12px; height: 12px;"></i></button>
@@ -418,7 +426,9 @@ export default async function renderSettings(container) {
             allow_expenses: true,
             allow_reports: false,
             allow_dashboard_balances: false,
-            allow_delete_invoices: false
+            allow_delete_invoices: false,
+            allow_fund_transfers: false,
+            allow_stock_adjustments: false
           }
         };
 
