@@ -99,7 +99,8 @@ const viewModules = {
   'barcode-labels': () => import('./views/labels.js'),
   'audit-log': () => import('./views/reports.js').then(m => m.AuditLogView),
   'sync-backup': () => import('./views/settings.js').then(m => m.SyncBackupView),
-  settings: () => import('./views/settings.js')
+  settings: () => import('./views/settings.js'),
+  'reset-password': () => import('./views/settings.js').then(m => m.ResetPasswordView)
 };
 
 // Global Layout DOM Selectors
@@ -237,14 +238,22 @@ export function renderLoginPortal() {
             <label class="form-label">Email Address</label>
             <input type="email" class="form-control" name="email" id="portal-email" placeholder="owner@store.com" required>
           </div>
-          <div class="form-group" style="margin-bottom: 20px; text-align: left;">
-            <label class="form-label">Password</label>
+          <div class="form-group" style="margin-bottom: 20px; text-align: left;" id="portal-password-group">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <label class="form-label" style="margin-bottom: 0;">Password</label>
+              <button type="button" id="btn-portal-forgot" style="background: none; border: none; font-size: 0.76rem; color: hsl(var(--primary)); cursor: pointer; text-decoration: underline; padding: 0;">Forgot Password?</button>
+            </div>
             <input type="password" class="form-control" name="password" id="portal-password" placeholder="Min 6 characters" required minlength="6">
           </div>
 
-          <div class="login-actions-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+          <div class="login-actions-grid" id="portal-login-actions" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
             <button type="button" class="btn btn-secondary" id="btn-portal-signup"><i data-lucide="user-plus"></i> Create Account</button>
-            <button type="submit" class="btn btn-primary"><i data-lucide="log-in"></i> Connect & Login</button>
+            <button type="submit" class="btn btn-primary" id="btn-portal-submit-login"><i data-lucide="log-in"></i> Connect & Login</button>
+          </div>
+          
+          <div id="portal-forgot-actions" style="display: none; flex-direction: column; gap: 12px; align-items: center;">
+            <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center; display: flex; align-items: center; gap: 6px;"><i data-lucide="mail"></i> Send Reset Email</button>
+            <button type="button" id="btn-portal-back-to-login" style="background: none; border: none; font-size: 0.8rem; color: hsl(var(--text-secondary)); cursor: pointer; text-decoration: underline;">Back to Login</button>
           </div>
         </form>
       </div>
@@ -306,6 +315,33 @@ export function renderLoginPortal() {
     });
   }
 
+  // Toggle forgot password mode
+  let isForgotMode = false;
+  const forgotBtn = overlay.querySelector('#btn-portal-forgot');
+  const backToLoginBtn = overlay.querySelector('#btn-portal-back-to-login');
+  const passwordGroup = overlay.querySelector('#portal-password-group');
+  const passwordInput = overlay.querySelector('#portal-password');
+  const loginActions = overlay.querySelector('#portal-login-actions');
+  const forgotActions = overlay.querySelector('#portal-forgot-actions');
+
+  if (forgotBtn && backToLoginBtn) {
+    forgotBtn.addEventListener('click', () => {
+      isForgotMode = true;
+      passwordGroup.style.display = 'none';
+      passwordInput.removeAttribute('required');
+      loginActions.style.display = 'none';
+      forgotActions.style.display = 'flex';
+    });
+
+    backToLoginBtn.addEventListener('click', () => {
+      isForgotMode = false;
+      passwordGroup.style.display = 'block';
+      passwordInput.setAttribute('required', 'true');
+      loginActions.style.display = 'grid';
+      forgotActions.style.display = 'none';
+    });
+  }
+
   // Handle local launch
   overlay.querySelector('#btn-portal-local-start').addEventListener('click', () => {
     localStorage.setItem('gb_session', JSON.stringify({ id: 'guest-user-offline', email: 'Offline Guest' }));
@@ -354,19 +390,30 @@ export function renderLoginPortal() {
     }
   });
 
-  // Handle Cloud Signin form submit
+  // Handle Cloud Signin or Reset Password form submit
   overlay.querySelector('#portal-cloud-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const url = overlay.querySelector('#portal-url').value || defaultUrl;
     const key = overlay.querySelector('#portal-key').value || defaultKey;
     const email = overlay.querySelector('#portal-email').value;
-    const pass = overlay.querySelector('#portal-password').value;
 
     try {
       db.update('business_settings', settings.id, { supabase_url: url, supabase_key: key });
       const client = getSupabase();
       if (!client) throw new Error("Client initialization failed. Verify URL/Key.");
 
+      if (isForgotMode) {
+        alert("Sending password reset instructions to your email...");
+        const { error } = await client.auth.resetPasswordForEmail(email, {
+          redirectTo: window.location.origin + window.location.pathname
+        });
+        if (error) throw error;
+        alert("Password reset email sent! Please check your email inbox to reset your password.");
+        backToLoginBtn.click(); // Reset UI back to login
+        return;
+      }
+
+      const pass = overlay.querySelector('#portal-password').value;
       alert("Connecting to Supabase and logging in...");
       const { data, error } = await client.auth.signInWithPassword({ email, password: pass });
       if (error) throw error;
@@ -395,7 +442,28 @@ export function renderLoginPortal() {
 }
 
 async function router() {
-  if (!renderLoginPortal()) return;
+  // Check if user is redirected here from a password reset email link
+  const hash = window.location.hash;
+  if (hash && (hash.includes('type=recovery') || hash.includes('recovery') || hash.includes('access_token'))) {
+    const params = new URLSearchParams(hash.replace('#', ''));
+    if (params.get('type') === 'recovery' || params.has('access_token')) {
+      const client = getSupabase();
+      if (client) {
+        // Wait slightly to let Supabase client extract token from hash
+        await new Promise(resolve => setTimeout(resolve, 500));
+        const { data: { session } } = await client.auth.getSession();
+        if (session && session.user) {
+          localStorage.setItem('gb_session', JSON.stringify({ id: session.user.id, email: session.user.email }));
+          window.location.hash = '#reset-password';
+          window.location.reload();
+          return;
+        }
+      }
+    }
+  }
+
+  // Prevent routing if user is not logged in and render login portal
+  if (window.location.hash !== '#reset-password' && !renderLoginPortal()) return;
   
   // Apply staff menu restricts
   applyStaffRestrictions();

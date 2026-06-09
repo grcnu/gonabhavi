@@ -559,7 +559,22 @@ export async function SyncBackupView(container) {
               <p style="font-weight: 600; color: hsl(var(--success)); margin-bottom: 4px;"><i data-lucide="shield-check" style="display: inline-block; width: 16px; height: 16px; vertical-align: middle;"></i> Cloud Sync Session Active</p>
               <p style="font-size: 0.85rem; color: hsl(var(--text-secondary));">Signed in as: <strong>${userEmail}</strong>. All changes auto-sync to cloud with a 3-second debounce.</p>
             </div>
-            <button class="btn btn-danger" id="btn-cloud-logout" style="width: 100%;"><i data-lucide="log-out"></i> Sign Out from Account</button>
+            <button class="btn btn-danger" id="btn-cloud-logout" style="width: 100%; margin-bottom: 24px;"><i data-lucide="log-out"></i> Sign Out from Account</button>
+
+            <hr style="border: none; border-top: 1px dashed hsl(var(--border-color)); margin: 24px 0;">
+            
+            <h4 style="margin-bottom: 16px; font-family: var(--font-brand); font-weight: 600;"><i data-lucide="key-round"></i> Change Account Password</h4>
+            <form id="change-cloud-password-form" style="display: flex; flex-direction: column; gap: 12px;">
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label" style="font-size: 0.8rem;">New Password (Min 6 chars)</label>
+                <input type="password" class="form-control" name="new_password" placeholder="New Password" required minlength="6" style="padding: 6px 10px; height: 34px; font-size: 0.85rem;">
+              </div>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label" style="font-size: 0.8rem;">Confirm New Password</label>
+                <input type="password" class="form-control" name="confirm_password" placeholder="Confirm Password" required minlength="6" style="padding: 6px 10px; height: 34px; font-size: 0.85rem;">
+              </div>
+              <button type="submit" class="btn btn-secondary" style="height: 34px; font-size: 0.85rem; justify-content: center; display: flex; align-items: center; gap: 6px;"><i data-lucide="save"></i> Update Password</button>
+            </form>
           `
           : `
             <div style="background: hsl(var(--bg-primary)); border: 1px solid hsl(var(--border-color)); padding: 16px; border-radius: var(--radius-sm); margin-bottom: 20px; font-size: 0.85rem; color: hsl(var(--text-secondary));">
@@ -1161,6 +1176,101 @@ create policy user_policy on business_settings for all using (user_id = auth.uid
       localStorage.removeItem('gb_session');
       db.logAudit("User Logged Out", "Cleared cloud session keys.");
       window.location.reload();
+    });
+  }
+
+  // Change password handle
+  const changePasswordForm = document.getElementById('change-cloud-password-form');
+  if (changePasswordForm) {
+    changePasswordForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const newPass = changePasswordForm.new_password.value;
+      const confirmPass = changePasswordForm.confirm_password.value;
+
+      if (newPass !== confirmPass) {
+        alert("Error: Passwords do not match. Please verify.");
+        return;
+      }
+
+      const client = getSupabase();
+      if (!client) {
+        alert("Error: Supabase is not connected.");
+        return;
+      }
+
+      alert("Updating password in cloud server...");
+      try {
+        const { error } = await client.auth.updateUser({ password: newPass });
+        if (error) throw error;
+        alert("Password updated successfully!");
+        changePasswordForm.reset();
+      } catch (err) {
+        alert(`Failed to update password: ${err.message}`);
+      }
+    });
+  }
+}
+
+// Named Export: Reset password form view (handles redirected recovery email links)
+export async function ResetPasswordView(container) {
+  container.innerHTML = `
+    <div style="max-width: 450px; margin: 40px auto; padding: 24px;" class="view-card">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <i data-lucide="key-round" style="width: 48px; height: 48px; color: hsl(var(--primary)); margin-bottom: 12px;"></i>
+        <h3 class="card-title" style="margin-bottom: 8px;">Reset Account Password</h3>
+        <p style="font-size: 0.85rem; color: hsl(var(--text-secondary));">Enter your new password to secure your account credentials.</p>
+      </div>
+
+      <form id="reset-password-form" style="display: flex; flex-direction: column; gap: 16px;">
+        <div class="form-group" style="margin-bottom: 0;">
+          <label class="form-label">New Password (Min 6 characters)</label>
+          <input type="password" class="form-control" name="new_password" placeholder="New Password" required minlength="6">
+        </div>
+        <div class="form-group" style="margin-bottom: 0;">
+          <label class="form-label">Confirm New Password</label>
+          <input type="password" class="form-control" name="confirm_password" placeholder="Confirm Password" required minlength="6">
+        </div>
+        
+        <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center; display: flex; align-items: center; gap: 6px; padding: 12px;">
+          <i data-lucide="check"></i> Save New Password
+        </button>
+      </form>
+    </div>
+  `;
+
+  if (window.lucide) window.lucide.createIcons();
+
+  const resetForm = document.getElementById('reset-password-form');
+  if (resetForm) {
+    resetForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const newPass = resetForm.new_password.value;
+      const confirmPass = resetForm.confirm_password.value;
+
+      if (newPass !== confirmPass) {
+        alert("Error: Passwords do not match. Please verify.");
+        return;
+      }
+
+      const client = getSupabase();
+      if (!client) {
+        alert("Error: Supabase connection could not be established.");
+        return;
+      }
+
+      alert("Updating password in cloud server...");
+      try {
+        const { error } = await client.auth.updateUser({ password: newPass });
+        if (error) throw error;
+        
+        alert("Password updated successfully! Please sign in again with your new credentials.");
+        // Clear session so they have to login with the new password
+        localStorage.removeItem('gb_session');
+        window.location.hash = '#dashboard';
+        window.location.reload();
+      } catch (err) {
+        alert(`Failed to update password: ${err.message}`);
+      }
     });
   }
 }

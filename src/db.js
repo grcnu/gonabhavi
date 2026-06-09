@@ -461,7 +461,9 @@ export const db = {
       allow_expenses: false,
       allow_reports: false,
       allow_dashboard_balances: false,
-      allow_delete_invoices: false
+      allow_delete_invoices: false,
+      allow_fund_transfers: false,
+      allow_stock_adjustments: false
     };
   },
 
