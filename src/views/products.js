@@ -580,6 +580,8 @@ function handleExcelImport(e) {
         const existing = products.find(p => p.qr === qr && !p.is_deleted);
 
         if (existing) {
+          // Don't overwrite opening_stock for existing products — it would corrupt live stock levels
+          delete updates.opening_stock;
           db.update('products', existing.id, updates);
           updatedCount++;
         } else {

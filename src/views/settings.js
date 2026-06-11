@@ -1073,12 +1073,18 @@ create policy user_policy on business_settings for all using (user_id = auth.uid
             throw new Error("Invalid backup format. Backup JSON file is corrupt or missing crucial entities.");
           }
 
-          // Restore
+          // Restore — clear ALL entities first, then import what's in the backup
           ENTITIES.forEach(key => {
             if (parsed[key]) {
               localStorage.setItem(`gb_${key}`, JSON.stringify(parsed[key]));
+            } else {
+              // Clear entities missing from backup to prevent stale phantom records
+              localStorage.setItem(`gb_${key}`, JSON.stringify([]));
             }
           });
+
+          // Clear sync queue to prevent old pending changes from overwriting restored data
+          localStorage.setItem('gb_sync_queue', JSON.stringify([]));
 
           db.logAudit("Backup Restored", "Imported business JSON file and replaced database.");
           alert("Restore Successful! Page will reload to load imported files.");

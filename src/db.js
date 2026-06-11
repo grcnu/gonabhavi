@@ -64,9 +64,9 @@ export const db = {
     return getRawCollection(entity);
   },
 
-  // Find single record by UUID
+  // Find single record by UUID (excludes soft-deleted records)
   find(entity, id) {
-    return getRawCollection(entity).find(item => item.id === id);
+    return getRawCollection(entity).find(item => item.id === id && !item.is_deleted);
   },
 
   // Save/Insert a new record
@@ -103,6 +103,9 @@ export const db = {
     }
     if (entity === 'purchase_returns' && newRecord.purchase_id) {
       db.recalculatePurchaseBillBalance(newRecord.purchase_id);
+    }
+    if (entity === 'sales_returns' && newRecord.invoice_id) {
+      db.recalculateInvoiceBalanceDue(newRecord.invoice_id);
     }
     
     // Invalidate stock cache for entities that affect stock levels
@@ -267,7 +270,11 @@ export const db = {
             else if (deletedPayment.method === 'Bank') inv.bank_paid = 0;
           }
           const netTotal = parseFloat(inv.grand_total || 0) - parseFloat(inv.final_discount || 0);
-          inv.balance_due = Math.max(0, netTotal - (totalCash + totalUpi + totalBank));
+          // Deduct sales returns linked to this invoice
+          const salesReturns = getRawCollection('sales_returns')
+            .filter(r => r.invoice_id === invoiceId && !r.is_deleted)
+            .reduce((sum, r) => sum + parseFloat(r.grand_total || 0), 0);
+          inv.balance_due = Math.max(0, netTotal - (totalCash + totalUpi + totalBank) - salesReturns);
           inv.updated_at = timestamp;
           invoices[invIdx] = inv;
           saveRawCollection('invoices', invoices);
@@ -292,6 +299,15 @@ export const db = {
       const billId = deletedReturn.purchase_id;
       if (billId) {
         db.recalculatePurchaseBillBalance(billId);
+      }
+    }
+
+    // When a sales_return linked to an invoice is deleted, recalculate invoice balance_due
+    if (entity === 'sales_returns') {
+      const deletedReturn = deletedRecord;
+      const invoiceId = deletedReturn.invoice_id;
+      if (invoiceId) {
+        db.recalculateInvoiceBalanceDue(invoiceId);
       }
     }
     
@@ -370,15 +386,23 @@ export const db = {
   // Log in internal audit log
   logAudit(action, details) {
     const list = getRawCollection('audit_logs');
+    // Include user identity for staff accountability
+    let userEmail = 'unknown';
+    try {
+      const session = localStorage.getItem('gb_session');
+      if (session) userEmail = JSON.parse(session).email || 'unknown';
+    } catch (e) { /* ignore */ }
     const log = {
       id: generateUUID(),
       timestamp: new Date().toISOString(),
       action,
       details,
+      user_id: db.getCurrentUserId(),
+      user_email: userEmail,
       is_deleted: false
     };
     list.unshift(log); // Newer first
-    if (list.length > 500) list.pop(); // Keep max 500 entries
+    if (list.length > 2000) list.pop(); // Keep max 2000 entries (~40 days at 50/day)
     saveRawCollection('audit_logs', list);
   },
 
@@ -507,6 +531,37 @@ export const db = {
     saveRawCollection('purchases', purchases);
     db.triggerAutoSync('purchases', bill);
     db.logAudit('Purchase Balance Updated', `Recalculated balance_due for Purchase Bill ID ${billId.substring(0,8)}.`);
+  },
+
+  // Recalculate invoice balance_due (mirrors recalculatePurchaseBillBalance)
+  // Called when sales_returns or payment_ins are inserted/deleted
+  recalculateInvoiceBalanceDue(invoiceId) {
+    const invoices = getRawCollection('invoices');
+    const invIdx = invoices.findIndex(inv => inv.id === invoiceId && !inv.is_deleted);
+    if (invIdx === -1) return;
+
+    const inv = invoices[invIdx];
+    const netTotal = parseFloat(inv.grand_total || 0) - parseFloat(inv.final_discount || 0);
+
+    // Sum all active payments (initial + subsequent)
+    const payments = getRawCollection('payment_ins');
+    const totalPaid = payments
+      .filter(p => p.invoice_id === invoiceId && !p.is_deleted)
+      .reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+
+    // Sum all active sales returns for this invoice
+    const returns = getRawCollection('sales_returns');
+    const totalReturns = returns
+      .filter(r => r.invoice_id === invoiceId && !r.is_deleted)
+      .reduce((sum, r) => sum + parseFloat(r.grand_total || 0), 0);
+
+    const newBalance = Math.max(0, netTotal - totalPaid - totalReturns);
+    inv.balance_due = parseFloat(newBalance.toFixed(2));
+    inv.updated_at = new Date().toISOString();
+    invoices[invIdx] = inv;
+    saveRawCollection('invoices', invoices);
+    db.triggerAutoSync('invoices', inv);
+    db.logAudit('Invoice Balance Updated', `Recalculated balance_due for Invoice ID ${invoiceId.substring(0,8)} (includes sales returns).`);
   }
 };
 
@@ -873,6 +928,7 @@ db.processSyncQueue = async function() {
   }
 
   const failedItems = [];
+  const MAX_RETRIES = 10;
 
   for (const item of queue) {
     try {
@@ -890,11 +946,18 @@ db.processSyncQueue = async function() {
       if (error) throw error;
     } catch (err) {
       console.error(`Failed to sync ${item.entity} ID ${item.id}`, err);
-      failedItems.push(item);
+      item.retryCount = (item.retryCount || 0) + 1;
+      if (item.retryCount < MAX_RETRIES) {
+        failedItems.push(item);
+      } else {
+        // Drop permanently failed items and log
+        console.warn(`Dropping sync item ${item.entity} ID ${item.id} after ${MAX_RETRIES} retries.`);
+        db.logAudit('Sync Item Dropped', `${item.entity} ID ${item.id.substring(0,8)} failed ${MAX_RETRIES} times and was removed from sync queue.`);
+      }
     }
   }
 
-  // Preserve items that failed due to network issues
+  // Preserve items that failed due to network issues (with retry limit)
   localStorage.setItem('gb_sync_queue', JSON.stringify(failedItems));
   
   if (failedItems.length > 0) {
@@ -923,12 +986,27 @@ db.syncCloudFull = async function() {
     for (const entity of ENTITIES) {
       if (entity === 'audit_logs') continue; // Audit logs can be kept local-only
 
-      // 1. Download records from cloud
-      const { data: rawCloudRecords, error } = await client
-        .from(entity)
-        .select('*');
+      // 1. Download ALL records from cloud (paginated to handle >1000 records)
+      let rawCloudRecords = [];
+      const PAGE_SIZE = 1000;
+      let from = 0;
+      let hasMore = true;
+      while (hasMore) {
+        const { data: page, error } = await client
+          .from(entity)
+          .select('*')
+          .eq('user_id', db.getCurrentUserId())
+          .range(from, from + PAGE_SIZE - 1);
 
-      if (error) throw error;
+        if (error) throw error;
+        if (page && page.length > 0) {
+          rawCloudRecords = rawCloudRecords.concat(page);
+          from += PAGE_SIZE;
+          hasMore = page.length === PAGE_SIZE; // If we got a full page, there might be more
+        } else {
+          hasMore = false;
+        }
+      }
 
       // Map rows from JSONB columns back to standard records
       const cloudRecords = rawCloudRecords.map(cloud => ({

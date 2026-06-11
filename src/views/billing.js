@@ -938,6 +938,11 @@ function saveBillingInvoice(shouldPrint = false) {
   const finalDisc = activeInvoice.final_discount || 0;
   const netPayable = grandTotal - finalDisc;
 
+  if (netPayable <= 0) {
+    alert("Invoice total is ₹0 or negative. Cannot save a zero-amount invoice.");
+    return;
+  }
+
   // Query subsequent payments if we are editing an invoice
   let subsequentPaid = 0;
   const isEdit = db.getAllRaw('invoices').some(inv => inv.id === activeInvoice.id);
@@ -958,7 +963,11 @@ function saveBillingInvoice(shouldPrint = false) {
     return;
   }
 
-  const balDue = netPayable - totalPaid;
+  // Deduct sales returns linked to this invoice
+  const salesReturnsTotal = db.get('sales_returns')
+    .filter(r => r.invoice_id === activeInvoice.id && !r.is_deleted)
+    .reduce((sum, r) => sum + parseFloat(r.grand_total || 0), 0);
+  const balDue = netPayable - totalPaid - salesReturnsTotal;
 
   // Reconcile updates
   const invoiceRecord = {
@@ -1546,7 +1555,11 @@ function renderInvoiceReceiptTemplate(invoiceId) {
 
             const currentTotal = parseFloat(currentInv.grand_total || 0) - parseFloat(currentInv.final_discount || 0);
             const currentPaidSum = totalCashPaid + totalUpiPaid + totalBankPaid;
-            currentInv.balance_due = Math.max(0, currentTotal - currentPaidSum);
+            // Deduct sales returns linked to this invoice
+            const salesReturnsTotal = db.get('sales_returns')
+              .filter(r => r.invoice_id === invoiceId && !r.is_deleted)
+              .reduce((sum, r) => sum + parseFloat(r.grand_total || 0), 0);
+            currentInv.balance_due = Math.max(0, currentTotal - currentPaidSum - salesReturnsTotal);
 
             db.update('invoices', invoiceId, currentInv, true);
           }
@@ -1600,7 +1613,9 @@ function renderInvoiceReceiptTemplate(invoiceId) {
 function generateInvoicePrintableHtml(inv, settings) {
   const finalDisc = parseFloat(inv.final_discount || 0);
   const total = inv.grand_total - finalDisc;
-  const paid = parseFloat(inv.cash_paid || 0) + parseFloat(inv.upi_paid || 0) + parseFloat(inv.bank_paid || 0);
+  // Sum ALL payments (initial + subsequent) from payment_ins records
+  const allPayments = db.get('payment_ins').filter(p => p.invoice_id === inv.id && !p.is_deleted);
+  const paid = allPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
   const due = parseFloat(inv.balance_due || 0);
 
   // Dynamic UPI QR code generation (UPI deep link)
@@ -2016,7 +2031,11 @@ function showCollectPaymentModal(invoiceId) {
 
       const currentTotal = parseFloat(currentInv.grand_total || 0) - parseFloat(currentInv.final_discount || 0);
       const currentPaidSum = totalCashPaid + totalUpiPaid + totalBankPaid;
-      currentInv.balance_due = Math.max(0, currentTotal - currentPaidSum);
+      // Deduct sales returns linked to this invoice
+      const salesReturnsTotal = db.get('sales_returns')
+        .filter(r => r.invoice_id === invoiceId && !r.is_deleted)
+        .reduce((sum, r) => sum + parseFloat(r.grand_total || 0), 0);
+      currentInv.balance_due = Math.max(0, currentTotal - currentPaidSum - salesReturnsTotal);
 
       // 3. Update the invoice with skipOverwritePayments = true
       db.update('invoices', invoiceId, currentInv, true);
