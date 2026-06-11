@@ -409,6 +409,7 @@ export const db = {
   getDefaultSettings() {
     return {
       id: '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d',
+      owner_id: null,
       company_name: 'My Business',
       phone: '',
       email: '',
@@ -439,10 +440,15 @@ export const db = {
   },
 
   getCurrentUserId() {
+    // Always use owner_id for data consistency across all devices
+    try {
+      const settings = db.get('business_settings');
+      if (settings.owner_id) return settings.owner_id;
+    } catch (e) { /* settings not loaded yet, fallback below */ }
+    // Fallback to logged-in user (first-time setup or before settings exist)
     const session = localStorage.getItem('gb_session');
     if (session) {
-      const user = JSON.parse(session);
-      return user.id;
+      try { return JSON.parse(session).id; } catch(e) {}
     }
     return 'guest-user-offline';
   },
@@ -450,13 +456,24 @@ export const db = {
   getUserRole() {
     const session = localStorage.getItem('gb_session');
     if (!session) return 'guest';
+    try { JSON.parse(session); } catch(e) { return 'guest'; }
     const user = JSON.parse(session);
     if (user.id === 'guest-user-offline') return 'owner';
 
+    // Check device-level staff mode (set in Settings per device)
+    const staffModeEmail = localStorage.getItem('gb_staff_mode_email');
+    if (staffModeEmail) {
+      const settings = db.get('business_settings');
+      const staffList = settings.staff_users || [];
+      if (staffList.some(s => s.email.toLowerCase() === staffModeEmail.toLowerCase())) {
+        return 'staff';
+      }
+    }
+
+    // Also check if the logged-in user IS a staff user (legacy support)
     const settings = db.get('business_settings');
     const staffList = settings.staff_users || [];
-    const isStaff = staffList.some(s => s.email === user.email);
-    if (isStaff) return 'staff';
+    if (staffList.some(s => s.email === user.email)) return 'staff';
 
     return 'owner';
   },
@@ -469,16 +486,29 @@ export const db = {
         allow_expenses: true,
         allow_reports: true,
         allow_dashboard_balances: true,
-        allow_delete_invoices: true
+        allow_delete_invoices: true,
+        allow_fund_transfers: true,
+        allow_stock_adjustments: true
       };
     }
 
-    const session = localStorage.getItem('gb_session');
-    if (!session) return {};
-    const user = JSON.parse(session);
+    // Determine which staff email to use for permissions
+    const staffModeEmail = localStorage.getItem('gb_staff_mode_email');
+    let lookupEmail = staffModeEmail;
+
+    if (!lookupEmail) {
+      // Legacy: check logged-in user's email
+      const session = localStorage.getItem('gb_session');
+      if (session) {
+        try { lookupEmail = JSON.parse(session).email; } catch(e) {}
+      }
+    }
+
+    if (!lookupEmail) return {};
+
     const settings = db.get('business_settings');
     const staffList = settings.staff_users || [];
-    const staff = staffList.find(s => s.email === user.email);
+    const staff = staffList.find(s => s.email.toLowerCase() === lookupEmail.toLowerCase());
     
     return staff?.permissions || {
       allow_purchases: false,

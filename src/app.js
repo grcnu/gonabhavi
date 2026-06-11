@@ -372,6 +372,12 @@ export function renderLoginPortal() {
 
       alert("Account created successfully! Performing cloud database handshake...");
       localStorage.setItem('gb_session', JSON.stringify({ id: data.user.id, email: data.user.email }));
+
+      // Save owner_id on first registration for multi-device data consistency
+      const settings = db.get('business_settings');
+      if (!settings.owner_id) {
+        db.update('business_settings', settings.id, { owner_id: data.user.id });
+      }
       
       try {
         await db.syncCloudFull();
@@ -420,6 +426,12 @@ export function renderLoginPortal() {
 
       localStorage.setItem('gb_session', JSON.stringify({ id: data.user.id, email: data.user.email }));
       alert("Logged in successfully! Performing cloud database handshake...");
+
+      // Save owner_id on first login for multi-device data consistency
+      const settings = db.get('business_settings');
+      if (!settings.owner_id) {
+        db.update('business_settings', settings.id, { owner_id: data.user.id });
+      }
       
       try {
         await db.syncCloudFull();
