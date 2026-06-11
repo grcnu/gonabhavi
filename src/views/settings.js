@@ -198,28 +198,6 @@ export default async function renderSettings(container) {
             <button type="submit" class="btn btn-primary" style="height: 34px; font-size: 0.85rem; padding: 0; justify-content: center; display: flex; align-items: center; gap: 4px;"><i data-lucide="plus"></i> Add</button>
           </div>
         </form>
-
-        <!-- Staff Mode per-device toggle -->
-        <div style="margin-top: 20px; padding: 16px; border-radius: var(--radius-sm); background: hsl(var(--bg-primary)); border: 1px solid hsl(var(--border-color));">
-          <h4 style="margin-bottom: 8px; font-family: var(--font-brand); font-weight: 600; display: flex; align-items: center; gap: 6px;">
-            <i data-lucide="monitor-smartphone"></i> Staff Mode (This Device Only)
-          </h4>
-          <p style="font-size: 0.8rem; color: hsl(var(--text-secondary)); margin-bottom: 12px; line-height: 1.4;">
-            Enable this on employee devices so staff permission restrictions apply, even when logged in with the owner account. This is a per-device setting — it only affects this browser.
-          </p>
-          <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
-            <select class="form-control" id="staff-mode-select" style="max-width: 300px; height: 34px; font-size: 0.85rem;">
-              <option value="">🔓 Owner Mode (Full Access)</option>
-              ${(settings.staff_users || []).map(s => `
-                <option value="${s.email}" ${localStorage.getItem('gb_staff_mode_email') === s.email ? 'selected' : ''}>🔒 Staff Mode — ${s.email}</option>
-              `).join('')}
-            </select>
-            <button class="btn btn-primary btn-sm" id="btn-apply-staff-mode" style="height: 34px; font-size: 0.85rem; padding: 0 14px;"><i data-lucide="check"></i> Apply</button>
-            <span id="staff-mode-status" style="font-size: 0.8rem; font-weight: 600; color: ${localStorage.getItem('gb_staff_mode_email') ? 'hsl(var(--warning))' : 'hsl(var(--success))'};">
-              ${localStorage.getItem('gb_staff_mode_email') ? '🔒 Staff Mode Active' : '🔓 Owner Mode'}
-            </span>
-          </div>
-        </div>
       </div>
 
       <!-- Secondary Panel: Invoice Custom Numbering and Logo previews -->
@@ -519,24 +497,6 @@ export default async function renderSettings(container) {
     });
   });
 
-  // Handle Staff Mode per-device toggle
-  const staffModeApplyBtn = document.getElementById('btn-apply-staff-mode');
-  if (staffModeApplyBtn) {
-    staffModeApplyBtn.addEventListener('click', async () => {
-      const select = document.getElementById('staff-mode-select');
-      const selectedEmail = select.value;
-      
-      if (selectedEmail) {
-        localStorage.setItem('gb_staff_mode_email', selectedEmail);
-        alert(`Staff Mode enabled for "${selectedEmail}" on this device. Staff permission restrictions will now apply.\n\nPage will reload to apply changes.`);
-      } else {
-        localStorage.removeItem('gb_staff_mode_email');
-        alert('Staff Mode disabled. This device now has full owner access.\n\nPage will reload to apply changes.');
-      }
-      
-      window.location.reload();
-    });
-  }
 }
 
 // Named Export: Backup & Sync Setup View
