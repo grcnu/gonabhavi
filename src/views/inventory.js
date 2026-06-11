@@ -648,6 +648,15 @@ export async function StockAdjustmentView(container) {
     // Direction calculation
     const qtyChange = direction === 'add' ? qty : -qty;
 
+    // M2: Warn if deduction would bring stock below zero
+    if (direction === 'subtract') {
+      const currentStock = calc.getCurrentStock(productId);
+      if (qty > currentStock) {
+        const proceed = confirm(`Warning: Current stock is ${currentStock}. Deducting ${qty} will result in negative stock. Proceed anyway?`);
+        if (!proceed) return;
+      }
+    }
+
     try {
       db.insert('stock_adjustments', {
         product_id: productId,

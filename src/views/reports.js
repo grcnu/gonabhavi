@@ -78,9 +78,9 @@ export default async function renderReportsHub(container) {
   invoices.forEach(inv => {
     inv.items?.forEach(it => {
       const gross = it.qty * it.rate;
-      const disc = gross * (it.discount_rate / 100);
+      const disc = gross * (parseFloat(it.discount_rate || 0) / 100);
       const afterDisc = gross - disc;
-      const taxable = afterDisc / (1 + it.gst_rate / 100);
+      const taxable = afterDisc / (1 + parseFloat(it.gst_rate || 0) / 100);
       salesGst += (afterDisc - taxable);
     });
   });
@@ -88,9 +88,9 @@ export default async function renderReportsHub(container) {
   returns.forEach(ret => {
     ret.items?.forEach(it => {
       const gross = it.qty * it.rate;
-      const disc = gross * (it.discount_rate / 100);
+      const disc = gross * (parseFloat(it.discount_rate || 0) / 100);
       const afterDisc = gross - disc;
-      const taxable = afterDisc / (1 + it.gst_rate / 100);
+      const taxable = afterDisc / (1 + parseFloat(it.gst_rate || 0) / 100);
       returnGst += (afterDisc - taxable);
     });
   });
@@ -487,6 +487,7 @@ export async function GstSummaryView(container) {
     // Compute Summaries
     let totalGrossSales = 0;
     let totalGrossTax = 0;
+    let totalReturnTaxable = 0;
     let totalReturnTax = 0;
     let totalNetTax = 0;
 
@@ -501,6 +502,7 @@ export async function GstSummaryView(container) {
 
       totalGrossSales += row.salesTaxable;
       totalGrossTax += row.salesGst;
+      totalReturnTaxable += row.returnTaxable;
       totalReturnTax += row.returnGst;
       totalNetTax += netTax;
 
@@ -527,7 +529,7 @@ export async function GstSummaryView(container) {
         <td class="text-right">${formatINR(totalGrossTax / 2)}</td>
         <td class="text-right">${formatINR(totalGrossTax)}</td>
         <td class="text-right text-danger">${formatINR(totalReturnTax)}</td>
-        <td class="text-right">${formatINR(totalGrossSales - totalReturnTax)}</td>
+        <td class="text-right">${formatINR(totalGrossSales - totalReturnTaxable)}</td>
         <td class="text-right" style="font-weight: 800; color: hsl(var(--success));">${formatINR(totalNetTax)}</td>
       </tr>
     `;
@@ -1126,8 +1128,11 @@ export async function ReceivablesPayablesView(container) {
 
     suppBills.forEach(bill => {
       const gross = parseFloat(bill.grand_total || 0);
-      const paid = parseFloat(bill.cash_paid || 0) + parseFloat(bill.upi_paid || 0) + parseFloat(bill.bank_paid || 0);
-      const due = gross - paid;
+      const initialPaid = parseFloat(bill.cash_paid || 0) + parseFloat(bill.upi_paid || 0) + parseFloat(bill.bank_paid || 0);
+      // Also subtract subsequent payment_outs and purchase_returns for this bill
+      const subsequentPaid = db.get('payment_outs').filter(p => p.bill_id === bill.id).reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+      const returnAmt = db.get('purchase_returns').filter(r => r.purchase_id === bill.id).reduce((s, r) => s + parseFloat(r.grand_total || 0), 0);
+      const due = gross - initialPaid - subsequentPaid - returnAmt;
       if (due <= 0.05) return;
 
       distributedAmt += due;
@@ -1390,7 +1395,7 @@ export async function CustomerLedgerView(container) {
       ref: 'OPEN-BAL',
       debit: openBal,
       credit: 0,
-      note: 'Starting opening balance in customer ledger ledger.',
+      note: 'Starting opening balance in customer ledger.',
       created_at: customer.created_at || customer.updated_at
     });
 
@@ -1755,7 +1760,7 @@ export async function MoneyLedgerView(container) {
               <tr>
                 <th>Date</th>
                 <th>Transaction Type</th>
-                <th>Reference Reference</th>
+                <th>Reference</th>
                 <th class="text-right">Inflow (Receipts +)</th>
                 <th class="text-right">Outflow (Payments -)</th>
                 <th class="text-right" style="font-weight: 700;">Running Reconciled Balance</th>
@@ -1881,23 +1886,23 @@ export async function MoneyLedgerView(container) {
         tx.push({
           date: tf.date,
           type: 'Fund Transfer Out',
-          ref: 'DEPOSIT-BANK',
+          ref: `TRANSFER-TO-${tf.to_account.toUpperCase()}`,
           in: 0,
           out: amt,
-          note: tf.note || `Deposited into Bank Account`,
+          note: tf.note || `Transferred to ${tf.to_account} account`,
           created_at: tf.created_at
         });
       }
 
-      // If Bank receiving from Cash/UPI
-      if (acc === 'Bank') {
+      // If this account is the receiving account for the transfer
+      if (tf.to_account === acc) {
         tx.push({
           date: tf.date,
           type: 'Fund Deposit In',
           ref: `TRANS-FROM-${tf.from_account.toUpperCase()}`,
           in: amt,
           out: 0,
-          note: tf.note || `Deposited from local ${tf.from_account} balance`,
+          note: tf.note || `Received from ${tf.from_account} account`,
           created_at: tf.created_at
         });
       }

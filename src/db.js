@@ -31,20 +31,15 @@ function getRawCollection(entity) {
 }
 
 function saveRawCollection(entity, data) {
-  // Fix #6: Handle browser storage quota exceeded — previously saves would silently fail
+  // Fix #6: Handle browser storage quota exceeded — alert user AND throw so callers know save failed
   try {
     localStorage.setItem(`gb_${entity}`, JSON.stringify(data));
   } catch (err) {
     if (err.name === 'QuotaExceededError' || err.code === 22) {
       console.error('[Gonabhavi] LocalStorage quota exceeded!', err);
-      // Display a persistent critical warning so the user knows the save failed
-      const msg = 'STORAGE FULL: Browser storage limit reached. This record may NOT have saved! ' +
-                  'Please go to Settings \u2192 Sync & Backup and perform a Cloud Sync immediately to free local space.';
-      // Use native alert here (not the toast) because this is truly critical
-      setTimeout(() => window.alert && window.alert('Storage Full Warning: ' + msg), 100);
-    } else {
-      throw err; // Re-throw unexpected errors
+      alert('⚠️ STORAGE FULL: Browser storage limit reached. This record was NOT saved!\n\nPlease go to Settings → Sync & Backup and perform a Cloud Sync immediately to free local space.');
     }
+    throw err; // Re-throw so callers know the save failed
   }
 }
 
@@ -75,12 +70,12 @@ export const db = {
     const timestamp = new Date().toISOString();
     
     const newRecord = {
+      ...record,
       id: record.id || generateUUID(),
       user_id: db.getCurrentUserId(),
       created_at: record.created_at || timestamp,
       updated_at: timestamp,
-      is_deleted: false,
-      ...record
+      is_deleted: false
     };
 
     // Uniqueness validation checks (for critical fields)
@@ -127,7 +122,8 @@ export const db = {
   update(entity, id, record, skipOverwritePayments = false) {
     const list = getRawCollection(entity);
     const idx = list.findIndex(item => item.id === id);
-    if (idx === -1) throw new Error(`Record with ID ${id} not found in ${entity}.`);
+    if (idx === -1) throw new Error(`Update failed: Record with ID ${id} not found in ${entity}.`);
+    if (list[idx].is_deleted && entity !== 'business_settings') return list[idx]; // Guard against updating soft-deleted records
 
     const timestamp = new Date().toISOString();
     const updatedRecord = {
@@ -175,6 +171,7 @@ export const db = {
     const list = getRawCollection(entity);
     const idx = list.findIndex(item => item.id === id);
     if (idx === -1) return false;
+    if (list[idx].is_deleted) return false; // Already deleted — don't re-process cascades
 
     // Check delete protection constraints
     db.checkDeleteSafety(entity, id);
@@ -351,7 +348,7 @@ export const db = {
       const customer = this.find('customers', id);
       const openBal = parseFloat(customer?.opening_balance || 0);
 
-      if (invs || orders || payments || salesRets || ests || challans || openBal > 0) {
+      if (invs || orders || payments || salesRets || ests || challans || Math.abs(openBal) > 0.01) {
         throw new Error("Customer cannot be deleted because they have associated transactions (sales, orders, payments, returns, estimates, challans, or a non-zero opening balance).");
       }
     }
@@ -363,7 +360,7 @@ export const db = {
       const supplier = this.find('suppliers', id);
       const openBal = parseFloat(supplier?.opening_balance || 0);
 
-      if (bills || payments || purchaseRets || openBal > 0) {
+      if (bills || payments || purchaseRets || Math.abs(openBal) > 0.01) {
         throw new Error("Supplier cannot be deleted because they have linked purchase bills, payments, returns, or a non-zero opening balance.");
       }
     }
@@ -456,8 +453,8 @@ export const db = {
   getUserRole() {
     const session = localStorage.getItem('gb_session');
     if (!session) return 'guest';
-    try { JSON.parse(session); } catch(e) { return 'guest'; }
-    const user = JSON.parse(session);
+    let user;
+    try { user = JSON.parse(session); } catch(e) { return 'guest'; }
     if (user.id === 'guest-user-offline') return 'owner';
 
     // Check device-level staff mode (set in Settings per device)
@@ -907,14 +904,16 @@ db.triggerAutoSync = function(entity, record) {
   // Add changes to an offline sync queue (stored in LocalStorage)
   const queue = JSON.parse(localStorage.getItem('gb_sync_queue') || '[]');
   
-  // Clean duplicates in queue
+  // Clean duplicates in queue — preserve retryCount from old entry
   const idx = queue.findIndex(q => q.id === record.id && q.entity === entity);
+  const oldRetryCount = idx !== -1 ? (queue[idx].retryCount || 0) : 0;
   if (idx !== -1) queue.splice(idx, 1);
   
   queue.push({
     entity,
     id: record.id,
     record,
+    retryCount: oldRetryCount,
     timestamp: new Date().getTime()
   });
   localStorage.setItem('gb_sync_queue', JSON.stringify(queue));
@@ -1183,10 +1182,13 @@ let lastBackgroundPullTime = 0;
 // Fix #12: Slowed background sync from 4s to 30s to reduce unnecessary Supabase API calls.
 // Manual saves still sync immediately via the debounce queue (no real-world delay).
 // Full pull from other devices now happens every 3 minutes instead of every 12 seconds.
+let _syncRunning = false; // Mutex to prevent concurrent sync operations
 setInterval(async () => {
   try {
+    if (_syncRunning) return; // Skip if another sync is in progress
     const client = getSupabase();
     if (!client || db.getCurrentUserId() === 'guest-user-offline') return;
+    _syncRunning = true;
 
     // 1. Process outgoing changes in the queue
     await db.processSyncQueue();
@@ -1200,6 +1202,8 @@ setInterval(async () => {
     }
   } catch (err) {
     console.warn("Background cloud sync checker skipped or offline:", err);
+  } finally {
+    _syncRunning = false;
   }
 }, 30000);
 

@@ -102,7 +102,10 @@ function generateNextInvoiceNumber() {
   
   invoices.forEach(inv => {
     // Try to extract sequence from inv number (handles both A-INV-0005 and INV-0005)
-    const regex = new RegExp(`^(?:[A-Z]${sep})?${prefix}${sep}(\\d+)${suffix ? suffix : ''}`);
+    const escapedSep = sep.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const escapedSuffix = suffix ? suffix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : '';
+    const regex = new RegExp(`^(?:[A-Za-z0-9]+${escapedSep})?${escapedPrefix}${escapedSep}(\\d+)${escapedSuffix}`);
     const match = inv.invoice_number?.match(regex);
     if (match) {
       const seqVal = parseInt(match[1]);
@@ -579,21 +582,21 @@ function renderBillingFormLayout(container) {
 
   // Totals calculations listeners
   document.getElementById('bill-final-discount-input').addEventListener('input', (e) => {
-    activeInvoice.final_discount = parseFloat(e.target.value || 0);
+    activeInvoice.final_discount = parseFloat(e.target.value) || 0;
     recalculateInvoiceTotals();
   });
 
   // Split payments listeners
   document.getElementById('bill-cash-input').addEventListener('input', (e) => {
-    activeInvoice.cash_paid = parseFloat(e.target.value || 0);
+    activeInvoice.cash_paid = parseFloat(e.target.value) || 0;
     recalculateInvoiceTotals();
   });
   document.getElementById('bill-upi-input').addEventListener('input', (e) => {
-    activeInvoice.upi_paid = parseFloat(e.target.value || 0);
+    activeInvoice.upi_paid = parseFloat(e.target.value) || 0;
     recalculateInvoiceTotals();
   });
   document.getElementById('bill-bank-input').addEventListener('input', (e) => {
-    activeInvoice.bank_paid = parseFloat(e.target.value || 0);
+    activeInvoice.bank_paid = parseFloat(e.target.value) || 0;
     recalculateInvoiceTotals();
   });
 
@@ -694,7 +697,7 @@ function attachCommonListeners(container, item, idx) {
   });
 
   container.querySelector('.item-qty-edit').addEventListener('change', (e) => {
-    item.qty = parseInt(e.target.value || 1);
+    item.qty = Math.max(1, Math.round(parseFloat(e.target.value) || 1));
     refreshItemsGrid();
   });
 
@@ -938,8 +941,8 @@ function saveBillingInvoice(shouldPrint = false) {
   const finalDisc = activeInvoice.final_discount || 0;
   const netPayable = grandTotal - finalDisc;
 
-  if (netPayable <= 0) {
-    alert("Invoice total is ₹0 or negative. Cannot save a zero-amount invoice.");
+  if (netPayable < 0) {
+    alert("Invoice total is negative. Cannot save a negative-amount invoice.");
     return;
   }
 
@@ -1945,6 +1948,11 @@ function showCollectPaymentModal(invoiceId) {
 
   document.getElementById('collect-payment-submit-form').addEventListener('submit', (e) => {
     e.preventDefault();
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    if (submitBtn.disabled) return; // Double-click guard
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Saving...';
+    try {
     const formData = new FormData(e.target);
     const cashAmt = parseFloat(formData.get('cash') || 0);
     const upiAmt = parseFloat(formData.get('upi') || 0);
@@ -2049,6 +2057,9 @@ function showCollectPaymentModal(invoiceId) {
       alert(`Successfully collected ₹${sum.toFixed(2)} payment on Invoice ${currentInv.invoice_number}.`);
     } catch (err) {
       alert(`Payment Collection failed: ${err.message}`);
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = '💰 Save Collection';
     }
   });
 }

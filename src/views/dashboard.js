@@ -55,7 +55,25 @@ export default async function renderDashboard(container) {
       }
     });
     
-    return filteredInvoices.reduce((sum, inv) => sum + (parseFloat(inv.grand_total || 0) - parseFloat(inv.final_discount || 0)), 0);
+    const salesTotal = filteredInvoices.reduce((sum, inv) => sum + (parseFloat(inv.grand_total || 0) - parseFloat(inv.final_discount || 0)), 0);
+    
+    // Subtract sales returns for the same period
+    const returns = db.get('sales_returns');
+    const returnTotal = returns.filter(ret => {
+      if (!ret.date) return false;
+      const dateStr = ret.date;
+      switch (period) {
+        case 'today': return dateStr === todayStr;
+        case 'this_month': return dateStr.startsWith(currentMonthPrefix);
+        case 'last_month': return dateStr.startsWith(lastMonthPrefix);
+        case 'this_year': return dateStr.startsWith(currentYearPrefix);
+        case 'custom': return dateStr >= customFrom && dateStr <= customTo;
+        case 'all': return true;
+        default: return false;
+      }
+    }).reduce((sum, ret) => sum + parseFloat(ret.grand_total || 0), 0);
+    
+    return salesTotal - returnTotal;
   };
 
   const initialSalesVal = getSalesForPeriod(activePeriod, fromDateVal, toDateVal);

@@ -1070,8 +1070,8 @@ create policy user_policy on business_settings for all using (user_id = auth.uid
           ];
           
           const missing = ENTITIES.filter(key => !parsed[key]);
-          if (missing.length > 5) { // Allow some slack but major parts must be present
-            throw new Error("Invalid backup format. Backup JSON file is corrupt or missing crucial entities.");
+          if (missing.length > 2) { // Allow minor slack but most entities must be present
+            throw new Error(`Invalid backup format. Missing ${missing.length} entities: ${missing.join(', ')}`);
           }
 
           // Restore — clear ALL entities first, then import what's in the backup
