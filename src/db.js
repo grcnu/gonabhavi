@@ -938,16 +938,24 @@ db.processSyncQueue = async function() {
   }
 
   // Validate active auth session in client
+  let authUserId = null;
   try {
     const { data: { session } } = await client.auth.getSession();
     if (!session && db.getCurrentUserId() !== 'guest-user-offline') {
       window.dispatchEvent(new CustomEvent('gb-sync-status', { detail: 'local' }));
       return;
     }
+    if (session && session.user) {
+      authUserId = session.user.id;
+    }
   } catch (e) {
     console.warn("Failed to verify sync session:", e);
     window.dispatchEvent(new CustomEvent('gb-sync-status', { detail: 'local' }));
     return;
+  }
+
+  if (!authUserId) {
+    authUserId = db.getCurrentUserId();
   }
 
   const queue = JSON.parse(localStorage.getItem('gb_sync_queue') || '[]');
@@ -966,7 +974,7 @@ db.processSyncQueue = async function() {
         .from(item.entity)
         .upsert({
           id: item.id,
-          user_id: db.getCurrentUserId(),
+          user_id: authUserId,
           updated_at: item.record.updated_at,
           is_deleted: item.record.is_deleted || false,
           data: item.record
@@ -1007,6 +1015,8 @@ db.syncCloudFull = async function() {
   if (!session && db.getCurrentUserId() !== 'guest-user-offline') {
     throw new Error("Active cloud login session not found. Please log in first.");
   }
+
+  const authUserId = session && session.user ? session.user.id : db.getCurrentUserId();
 
   window.dispatchEvent(new CustomEvent('gb-sync-status', { detail: 'syncing' }));
   db.logAudit("Full Sync Started", "Beginning smart sync download and merge with Supabase.");
@@ -1076,7 +1086,7 @@ db.syncCloudFull = async function() {
             // Case 7: Deleted locally -> sync deletion to cloud
             await client.from(entity).upsert({
               id: local.id,
-              user_id: db.getCurrentUserId(),
+              user_id: authUserId,
               updated_at: local.updated_at,
               is_deleted: local.is_deleted || false,
               data: local
@@ -1088,7 +1098,7 @@ db.syncCloudFull = async function() {
             // Case 4: Local is newer -> upload to cloud
             await client.from(entity).upsert({
               id: local.id,
-              user_id: db.getCurrentUserId(),
+              user_id: authUserId,
               updated_at: local.updated_at,
               is_deleted: local.is_deleted || false,
               data: local
@@ -1105,7 +1115,7 @@ db.syncCloudFull = async function() {
           // Case 2: Only on local -> upload
           await client.from(entity).upsert({
             id: local.id,
-            user_id: db.getCurrentUserId(),
+            user_id: authUserId,
             updated_at: local.updated_at,
             is_deleted: local.is_deleted || false,
             data: local
@@ -1152,7 +1162,7 @@ db.syncCloudFull = async function() {
           // Re-upload resolved invoice
           await client.from('invoices').upsert({
             id: conflictInv.id,
-            user_id: db.getCurrentUserId(),
+            user_id: authUserId,
             updated_at: conflictInv.updated_at,
             is_deleted: conflictInv.is_deleted || false,
             data: conflictInv

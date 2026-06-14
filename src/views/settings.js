@@ -1111,11 +1111,14 @@ create policy user_policy on business_settings for all using (user_id = auth.uid
     }
     
     try {
+      const { data: { session } } = await client.auth.getSession();
+      const authUserId = session && session.user ? session.user.id : db.getCurrentUserId();
+
       const { error } = await client
         .from(entity)
         .upsert({
           id: record.id,
-          user_id: db.getCurrentUserId(),
+          user_id: authUserId,
           updated_at: record.updated_at,
           is_deleted: record.is_deleted || false,
           data: record
