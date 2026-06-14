@@ -710,6 +710,47 @@ export async function SyncBackupView(container) {
     </div>
   `;
 
+  // Helper to format record names in the health check
+  function getRecordLabel(entityKey, record) {
+    if (!record) return 'Unknown Record';
+    switch (entityKey) {
+      case 'invoices':
+        return record.invoice_number ? `Invoice #${record.invoice_number}` : `Invoice (${record.id.substring(0,8)})`;
+      case 'products':
+        return record.name ? `${record.name}` : `Product (${record.id.substring(0,8)})`;
+      case 'customers':
+        return record.name ? `${record.name}` : `Customer (${record.id.substring(0,8)})`;
+      case 'suppliers':
+        return record.name ? `${record.name}` : `Supplier (${record.id.substring(0,8)})`;
+      case 'purchases':
+        return record.bill_number ? `Purchase Bill #${record.bill_number}` : `Purchase Bill (${record.id.substring(0,8)})`;
+      case 'payment_ins':
+        return `Payment Received: ₹${record.amount || 0} (${record.payment_mode || 'Cash'})`;
+      case 'payment_outs':
+        return `Payment Made: ₹${record.amount || 0} (${record.payment_mode || 'Cash'})`;
+      case 'expenses':
+        return `Expense: ₹${record.amount || 0} (${record.category || 'Other'})`;
+      case 'sale_orders':
+        return record.order_number ? `Sale Order #${record.order_number}` : `Sale Order (${record.id.substring(0,8)})`;
+      case 'estimates':
+        return record.estimate_number ? `Estimate #${record.estimate_number}` : `Estimate (${record.id.substring(0,8)})`;
+      case 'delivery_challans':
+        return record.challan_number ? `Challan #${record.challan_number}` : `Challan (${record.id.substring(0,8)})`;
+      case 'sales_returns':
+        return record.return_number ? `Sales Return #${record.return_number}` : `Sales Return (${record.id.substring(0,8)})`;
+      case 'purchase_returns':
+        return record.return_number ? `Purchase Return #${record.return_number}` : `Purchase Return (${record.id.substring(0,8)})`;
+      case 'stock_adjustments':
+        return `Stock Adj: ${record.date || record.id.substring(0,8)}`;
+      case 'fund_transfers':
+        return `Fund Transfer: ₹${record.amount || 0}`;
+      case 'business_settings':
+        return 'Business Settings';
+      default:
+        return `${entityKey} (${record.id.substring(0,8)})`;
+    }
+  }
+
   // ── Sync Health Check Engine ─────────────────────────────────────────────
   async function runSyncHealthCheck() {
     const tableContainer = document.getElementById('sync-health-table-container');
@@ -754,16 +795,21 @@ export async function SyncBackupView(container) {
       let cloudCount = null;
       let cloudDeleted = null;
       let errorMsg = null;
+      let missingRecords = [];
 
       if (isOnline) {
         try {
-          // Count active cloud records
-          const { count: activeCount, error: e1 } = await client
+          // Fetch IDs of active cloud records
+          const { data: cloudActiveData, error: e1 } = await client
             .from(entity.key)
-            .select('id', { count: 'exact', head: true })
+            .select('id')
             .eq('is_deleted', false);
           if (e1) throw e1;
-          cloudCount = activeCount ?? 0;
+          const cloudActiveIds = new Set((cloudActiveData || []).map(r => r.id));
+          cloudCount = cloudActiveIds.size;
+
+          // Find which local active records are not in the cloud
+          missingRecords = localActive.filter(l => !cloudActiveIds.has(l.id));
 
           // Count deleted cloud records
           const { count: deletedCount, error: e2 } = await client
@@ -783,6 +829,7 @@ export async function SyncBackupView(container) {
         localDeleted: localDeleted.length,
         cloudCount,
         cloudDeleted,
+        missingRecords,
         errorMsg,
         isOnline
       });
@@ -809,7 +856,7 @@ export async function SyncBackupView(container) {
       } else if (r.cloudCount > r.localCount) {
         statusIcon = '🔵'; statusText = 'Cloud has more (other device)'; statusColor = 'var(--primary)'; rowBg = 'hsl(var(--primary) / 0.04)';
       } else {
-        const missing = r.localCount - r.cloudCount;
+        const missing = Math.max(0, r.localCount - r.cloudCount);
         statusIcon = '🟡'; statusText = `${missing} record(s) not yet uploaded`; statusColor = 'var(--warning)'; rowBg = 'hsl(var(--warning) / 0.04)';
       }
 
@@ -817,18 +864,41 @@ export async function SyncBackupView(container) {
         : r.errorMsg ? `<span style="color: hsl(var(--danger)); font-size: 0.75rem;">${r.errorMsg.substring(0,30)}</span>`
         : `<strong>${r.cloudCount}</strong> <span style="color: hsl(var(--text-muted)); font-size: 0.78rem;">(+${r.cloudDeleted} deleted)</span>`;
 
+      let missingDetailsHtml = '';
+      if (r.missingRecords && r.missingRecords.length > 0) {
+        const itemsList = r.missingRecords.map(item => {
+          const label = getRecordLabel(r.key, item);
+          return `
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 4px; padding: 4px 8px; background: hsl(var(--warning) / 0.08); border: 1px solid hsl(var(--warning) / 0.15); border-radius: var(--radius-xs); font-size: 0.75rem;">
+              <span style="color: hsl(var(--text-primary)); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 170px;" title="${label}">${label}</span>
+              <button class="btn btn-secondary btn-xs btn-upload-single-missing" data-entity="${r.key}" data-id="${item.id}" style="padding: 2px 6px; font-size: 0.75rem; height: auto; display: flex; align-items: center; gap: 4px;">
+                <i data-lucide="upload-cloud" style="width: 10px; height: 10px;"></i> Push
+              </button>
+            </div>
+          `;
+        }).join('');
+
+        missingDetailsHtml = `
+          <div style="margin-top: 8px; border-top: 1px dashed hsl(var(--border-color)); padding-top: 6px;">
+            <div style="font-size: 0.72rem; font-weight: 600; color: hsl(var(--warning)); text-align: left; margin-bottom: 4px;">Unsynced Items:</div>
+            ${itemsList}
+          </div>
+        `;
+      }
+
       return `
         <tr style="background: ${rowBg};">
-          <td style="font-weight: 500;">
+          <td style="font-weight: 500; vertical-align: top; padding-top: 12px;">
             <i data-lucide="${r.icon}" style="width: 14px; height: 14px; vertical-align: middle; margin-right: 6px; opacity: 0.7;"></i>
             ${r.label}
           </td>
-          <td style="text-align: center; font-weight: 700;">${r.localCount} <span style="color: hsl(var(--text-muted)); font-size: 0.78rem; font-weight: 400;">(+${r.localDeleted} deleted)</span></td>
-          <td style="text-align: center;">${cloudDisplay}</td>
-          <td style="text-align: center;">
+          <td style="text-align: center; font-weight: 700; vertical-align: top; padding-top: 12px;">${r.localCount} <span style="color: hsl(var(--text-muted)); font-size: 0.78rem; font-weight: 400;">(+${r.localDeleted} deleted)</span></td>
+          <td style="text-align: center; vertical-align: top; padding-top: 12px;">${cloudDisplay}</td>
+          <td style="text-align: center; vertical-align: top; padding-top: 12px;">
             <span style="color: hsl(${statusColor}); font-weight: 600; font-size: 0.85rem; white-space: nowrap;">
               ${statusIcon} ${statusText}
             </span>
+            ${missingDetailsHtml}
           </td>
         </tr>`;
     }).join('');
@@ -1010,6 +1080,64 @@ create policy user_policy on business_settings for all using (user_id = auth.uid
       window.location.reload();
     } catch (err) {
       alert(`Cloud sync handshake failed: ${err.message}`);
+    }
+  });
+
+  // Event delegation on settings container for Push buttons
+  container.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.btn-upload-single-missing');
+    if (!btn) return;
+    
+    const entity = btn.getAttribute('data-entity');
+    const id = btn.getAttribute('data-id');
+    
+    const localRecords = db.getAllRaw(entity);
+    const record = localRecords.find(r => r.id === id);
+    if (!record) {
+      alert("Record not found locally!");
+      return;
+    }
+    
+    btn.disabled = true;
+    const originalContent = btn.innerHTML;
+    btn.innerHTML = `<span class="spinner-border" style="display: inline-block; width: 10px; height: 10px; border: 1.5px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: spin 1s infinite linear; margin-right: 4px;"></span> Syncing...`;
+    
+    const client = getSupabase();
+    if (!client) {
+      alert("Supabase client not available.");
+      btn.disabled = false;
+      btn.innerHTML = originalContent;
+      return;
+    }
+    
+    try {
+      const { error } = await client
+        .from(entity)
+        .upsert({
+          id: record.id,
+          user_id: db.getCurrentUserId(),
+          updated_at: record.updated_at,
+          is_deleted: record.is_deleted || false,
+          data: record
+        });
+      if (error) throw error;
+      
+      // Remove from local sync queue if it's there
+      try {
+        const queue = JSON.parse(localStorage.getItem('gb_sync_queue') || '[]');
+        const cleanQueue = queue.filter(q => !(q.id === record.id && q.entity === entity));
+        localStorage.setItem('gb_sync_queue', JSON.stringify(cleanQueue));
+      } catch (qe) {}
+      
+      // Log audit
+      db.logAudit("Manual Item Sync", `Manually synchronized ${entity} ID ${record.id.substring(0,8)}.`);
+      
+      // Refresh check
+      runSyncHealthCheck();
+    } catch (err) {
+      alert("Sync failed: " + (err.message || err));
+      btn.disabled = false;
+      btn.innerHTML = originalContent;
     }
   });
 
