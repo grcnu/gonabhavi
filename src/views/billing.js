@@ -1950,9 +1950,6 @@ function showCollectPaymentModal(invoiceId) {
     e.preventDefault();
     const submitBtn = e.target.querySelector('button[type="submit"]');
     if (submitBtn.disabled) return; // Double-click guard
-    submitBtn.disabled = true;
-    submitBtn.textContent = 'Saving...';
-    try {
     const formData = new FormData(e.target);
     const cashAmt = parseFloat(formData.get('cash') || 0);
     const upiAmt = parseFloat(formData.get('upi') || 0);
@@ -1968,6 +1965,9 @@ function showCollectPaymentModal(invoiceId) {
       return;
     }
 
+    // Disable button only after validation passes, so it never gets stuck disabled
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Saving...';
     try {
       // Fetch latest record to avoid race conditions
       const currentInv = db.find('invoices', invoiceId);
@@ -2169,7 +2169,11 @@ function showEditPaymentModal(paymentId, invoiceId) {
 
         const currentTotal = parseFloat(currentInv.grand_total || 0) - parseFloat(currentInv.final_discount || 0);
         const currentPaidSum = totalCashPaid + totalUpiPaid + totalBankPaid;
-        currentInv.balance_due = Math.max(0, currentTotal - currentPaidSum);
+        // Also subtract sales returns linked to this invoice (same as collect-payment logic)
+        const salesReturnsTotal = db.get('sales_returns')
+          .filter(r => r.invoice_id === invoiceId && !r.is_deleted)
+          .reduce((sum, r) => sum + parseFloat(r.grand_total || 0), 0);
+        currentInv.balance_due = Math.max(0, currentTotal - currentPaidSum - salesReturnsTotal);
 
         db.update('invoices', invoiceId, currentInv, true);
       }
