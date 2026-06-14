@@ -374,7 +374,7 @@ export function renderLoginPortal() {
       localStorage.setItem('gb_session', JSON.stringify({ id: data.user.id, email: data.user.email }));
 
       // Save owner_id on first registration for multi-device data consistency
-      const settings = db.get('business_settings');
+      // (use outer 'settings' from renderLoginPortal scope — re-declaring const here causes TDZ error when minified)
       if (!settings.owner_id) {
         db.update('business_settings', settings.id, { owner_id: data.user.id });
       }
@@ -428,7 +428,7 @@ export function renderLoginPortal() {
       alert("Logged in successfully! Performing cloud database handshake...");
 
       // Save owner_id on first login for multi-device data consistency
-      const settings = db.get('business_settings');
+      // (use outer 'settings' from renderLoginPortal scope — re-declaring const here causes TDZ error when minified)
       if (!settings.owner_id) {
         db.update('business_settings', settings.id, { owner_id: data.user.id });
       }
