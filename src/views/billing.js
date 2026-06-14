@@ -160,7 +160,8 @@ function renderBillingFormLayout(container) {
         </div>
 
         <!-- Add Items / Barcode Scanner Card -->
-        <div class="view-card" style="padding: 16px;">
+        <!-- z-index here ensures the product search dropdown floats above the Invoiced Items card below (backdrop-filter creates a stacking context) -->
+        <div class="view-card" style="padding: 16px; position: relative; z-index: 10;">
           <div class="billing-product-bar-grid">
             
             <!-- Searchable Product Input (Vyapar-style) -->
